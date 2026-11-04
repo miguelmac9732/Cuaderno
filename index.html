@@ -191,6 +191,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
       <div>
         <div class="clock" id="clock">0:00:00</div>
         <div class="state" id="rstate">Toca el botón rojo cuando empiece la clase.</div>
+        <div class="state small" id="rsave" style="color:var(--ok)"></div>
       </div>
     </div>
     <div class="livetext" id="live"><p class="muted">El texto aparece aquí mientras el profesor habla. Se guarda solo cada pocos segundos.</p></div>
@@ -261,7 +262,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </form>
     <div class="notes" id="qa-ans" style="margin-top:10px"></div>
   </section>
-  <details class="box" id="c-tx-box"><summary>Transcripción completa</summary><div class="in"><div class="row" style="margin-bottom:8px"><button class="btn sm" id="c-dltx" type="button">Descargar transcripción</button></div><pre id="c-tx">Cargando…</pre></div></details>
+  <details class="box" id="c-tx-box"><summary>Transcripción completa</summary><div class="in"><div class="row" style="margin-bottom:8px"><button class="btn sm" id="c-dltx" type="button">Descargar transcripción</button><button class="btn sm" id="c-punt" type="button" hidden>Corregir puntuación</button></div><pre id="c-tx">Cargando…</pre></div></details>
 </div></section>
 
 <!-- AJUSTES -->
@@ -317,7 +318,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
     <p class="msg" id="a-resp-msg" role="status"></p>
   </section>
-  <p class="muted small">Cuaderno de Clase · versión 1.1</p>
+  <p class="muted small">Cuaderno de Clase · versión 1.4</p>
 </div></section>
 </main>
 
@@ -428,6 +429,7 @@ const Local = {
   async putClase(c) { await L.put('clases', JSON.parse(JSON.stringify(c))); await this.emitir(); },
   async delClase(c) { await L.del('clases', c.id); await L.del('textos', c.id); await this.emitir(); },
   async putTextos(id, partes) { await L.put('textos', { id, partes }); },
+  async putParte(id, i, texto) { const t = (await L.get('textos', id)) || { id, partes: [] }; t.partes[i] = texto; await L.put('textos', t); },
   async getTextos(c) { const t = await L.get('textos', c.id); return (t && t.partes) || []; },
   detener() {},
 };
@@ -449,6 +451,7 @@ const Nube = {
     for (let i = 0; i < (c.nPartes || 1); i++) await this.base().collection('textos').doc(`${c.id}_${i}`).delete();
   },
   async putTextos(id, partes) { for (let i = 0; i < partes.length; i++) await this.base().collection('textos').doc(`${id}_${i}`).set({ clase: id, i, texto: partes[i] }); },
+  async putParte(id, i, texto) { await this.base().collection('textos').doc(`${id}_${i}`).set({ clase: id, i, texto }); },
   async getTextos(c) {
     const out = [];
     for (let i = 0; i < (c.nPartes || 1); i++) { const d = await this.base().collection('textos').doc(`${c.id}_${i}`).get(); if (d.exists) out.push(d.data().texto); }
@@ -570,6 +573,25 @@ Transcripción de esta parte:
 """
 ${tx}
 """`;
+const pPuntuar = (tx) => `Corrige la puntuación de esta transcripción automática de una clase, en español de Colombia.
+Reglas:
+- Agrega puntos, comas, signos de interrogación y exclamación (¿? ¡!), tildes y mayúsculas donde correspondan.
+- Corrige solo palabras claramente mal reconocidas, por el contexto (nombres de normas, cortes, autores, términos técnicos).
+- Elimina las palabras repetidas seguidas por error del reconocimiento ("son son son" → "son").
+- NO resumas, NO quites ideas y NO agregues contenido que no se dijo.
+- Conserva exactamente las marcas de tiempo como [0:01:43] al inicio de cada párrafo y los avisos entre corchetes.
+- Divide en párrafos cuando cambie la idea.
+Devuelve solo el texto corregido, sin comentarios ni comillas.
+
+Transcripción:
+"""
+${tx}
+"""`;
+async function puntuarParte(tx, opts) {
+  const { text } = await llamar(pPuntuar(tx), Object.assign({}, opts, { max: 32000, model: MODELOS.economica }));
+  const t = text.replace(/^\s*"{3}\s*|\s*"{3}\s*$/g, '').trim();
+  return t.length >= tx.length * 0.7 ? t : tx; // si la respuesta salió recortada, se conserva el original
+}
 const pFinal = (c, det) => `Estos son los apuntes detallados, por partes, de una clase de aproximadamente ${duracion(c.chars)}.
 ${cab(c)}
 Con base SOLO en ellos, escribe el RESUMEN GERENCIAL de toda la clase, en español y en Markdown, con exactamente este formato:
@@ -588,12 +610,15 @@ function pintarJob() {
   $('#c-proglbl').textContent = A.prog.txt;
   $('#c-resumen').innerHTML = A.live || '<p class="wait">Leyendo la clase… la primera respuesta puede tardar 1 o 2 minutos.</p>';
 }
-async function procesar(c) {
+async function procesar(c, soloPuntuar) {
   if (A.job) { msg($('#c-msg'), 'Ya se están generando otros apuntes. Espera a que terminen.', 'warn'); return; }
   if (!apiKey()) { msg($('#c-msg'), errIA({ sinClave: true }), 'bad'); return; }
   A.job = c; A.ctl = new AbortController(); A.live = ''; msg($('#c-msg'), '');
   const signal = A.ctl.signal;
-  const total = c.nPartes <= 1 ? 1 : c.nPartes + 1;
+  const nPunt = c.puntuada ? 0 : c.nPartes - (c.pPunt || 0);
+  const nNotas = soloPuntuar ? 0 : (c.nPartes <= 1 ? 1 : c.nPartes + 1);
+  const total = Math.max(1, nPunt + nNotas);
+  const estadoBase = c.estado === 'lista' ? 'lista' : 'pendiente';
   const paso = (n, t) => { A.prog = { pct: Math.round(n / total * 100), txt: t }; pintarJob(); };
   const alReintentar = (s) => { A.prog.txt = `Reintentando en ${s} s…`; pintarJob(); };
   render();
@@ -601,22 +626,46 @@ async function procesar(c) {
     let partes = A.txCache[c.id];
     if (!partes || !partes.length) partes = A.txCache[c.id] = await A.store.getTextos(c);
     if (!partes.length) throw { mensaje: 'No encontré la transcripción de esta clase', status: 400 };
-    c.estado = 'procesando'; c.modelo = modelo();
+    c.estado = 'procesando';
+    if (!c.puntuada) {
+      for (let i = c.pPunt || 0; i < c.nPartes; i++) {
+        const hecho = i - (c.pPunt || 0);
+        paso(hecho, c.nPartes > 1 ? `Corrigiendo puntuación de la transcripción… parte ${i + 1} de ${c.nPartes}` : 'Corrigiendo puntuación de la transcripción…');
+        A.live = '<p class="wait">Poniendo puntos, comas y signos de pregunta a la transcripción…</p>'; pintarJob();
+        const nuevo = await puntuarParte(partes[i], { signal, alReintentar, onText: (t) => { A.live = '<p class="wait">Poniendo puntos, comas y signos de pregunta a la transcripción…</p><p>' + esc(t.slice(-700)) + '</p>'; pintarJob(); } });
+        partes[i] = nuevo; A.txCache[c.id] = partes;
+        await A.store.putParte(c.id, i, nuevo);
+        c.pPunt = i + 1;
+        await A.store.putClase(Object.assign({}, c, { estado: estadoBase }));
+      }
+      c.puntuada = true;
+      await A.store.putClase(Object.assign({}, c, { estado: estadoBase }));
+    }
+    const base = nPunt;
+    const pasoN = (n, t) => paso(base + n, t);
+    if (soloPuntuar) {
+      c.estado = estadoBase;
+      await A.store.putClase(c);
+      A.prog = { pct: 100, txt: 'Listo' };
+      msg($('#c-msg'), 'Transcripción corregida: ya tiene puntos, comas y signos.', 'ok');
+      return;
+    }
+    c.modelo = modelo();
     if (c.nPartes <= 1) {
-      paso(0, 'Generando apuntes…');
+      pasoN(0, 'Generando apuntes…');
       const { text } = await llamar(pUnico(c, partes[0]), { signal, max: 16000, alReintentar, onText: (t) => { const [r, d] = separar(t); A.live = md(r) + (d ? '<h2>Apuntes detallados</h2>' + md(d) : ''); pintarJob(); } });
       const [r, d] = separar(text);
       c.resumen = r; c.notasPartes = d ? [d] : [];
     } else {
       for (let i = (c.notasPartes || []).length; i < c.nPartes; i++) {
         const prev = c.notasPartes.join('\n\n');
-        paso(i, `Parte ${i + 1} de ${c.nPartes}${rango(partes[i])}. Se guarda al terminar cada parte.`);
+        pasoN(i, `Apuntes: parte ${i + 1} de ${c.nPartes}${rango(partes[i])}. Se guarda al terminar cada parte.`);
         A.live = md(prev) + '<p class="wait">Leyendo esta parte…</p>'; pintarJob();
         const { text } = await llamar(pParte(c, partes[i], i), { signal, alReintentar, onText: (t) => { A.live = md(prev + '\n\n' + t); pintarJob(); } });
         c.notasPartes = c.notasPartes.concat(text.trim());
         await A.store.putClase(Object.assign({}, c, { estado: 'pendiente' }));
       }
-      paso(c.nPartes, 'Armando el resumen gerencial…');
+      pasoN(c.nPartes, 'Armando el resumen gerencial…');
       A.live = '<p class="wait">Armando el resumen gerencial…</p>'; pintarJob();
       const { text } = await llamar(pFinal(c, c.notasPartes.join('\n\n')), { signal, max: 8000, alReintentar, onText: (t) => { A.live = md(t); pintarJob(); } });
       c.resumen = text.trim();
@@ -626,12 +675,13 @@ async function procesar(c) {
     A.prog = { pct: 100, txt: 'Listo' };
     msg($('#c-msg'), 'Apuntes listos.', 'ok');
   } catch (e) {
-    c.estado = c.estado === 'lista' ? 'lista' : 'pendiente';
+    c.estado = estadoBase;
     try { await A.store.putClase(c); } catch (x) {}
     msg($('#c-msg'), errIA(e), e && e.abort ? 'warn' : 'bad');
   } finally {
     A.job = null; A.ctl = null; A.live = '';
     render();
+    if ($('#c-tx-box').open && A.txCache[c.id]) $('#c-tx').textContent = A.txCache[c.id].join('\n\n');
   }
 }
 
@@ -764,10 +814,12 @@ function renderClase() {
   }
   const det = (c.notasPartes || []).join('\n\n');
   $('#c-det-box').hidden = run || !det;
+  $('#c-punt').hidden = run || !!c.puntuada;
   if (!run) $('#c-det').innerHTML = md(det);
 }
 $('#c-gen').addEventListener('click', () => { const c = claseDe(A.sel); if (c) procesar(Object.assign({}, c, { notasPartes: [...(c.notasPartes || [])] })); });
 $('#c-stop').addEventListener('click', () => A.ctl && A.ctl.abort());
+$('#c-punt').addEventListener('click', () => { const c = claseDe(A.sel); if (c) { $('#c-tx-box').open = false; window.scrollTo(0, 0); procesar(Object.assign({}, c, { notasPartes: [...(c.notasPartes || [])] }), true); } });
 $('#c-grupo').addEventListener('change', async () => { const c = claseDe(A.sel); if (!c || (A.job && A.job.id === c.id)) return; await A.store.putClase(Object.assign({}, c, { grupoId: $('#c-grupo').value })); msg($('#c-msg'), 'Clase movida de grupo.', 'ok'); });
 function mdExport(c) {
   const det = (c.notasPartes || []).join('\n\n');
@@ -911,9 +963,20 @@ const textoTotal = () => [textoGrabado(), (B.texto || '').trim()].filter((x) => 
 const hayBorrador = () => B.parrafos.length > 0 || (B.texto || '').trim().length > 0;
 async function guardarBorrador(forzar) {
   if (!bCambio && !forzar) return; bCambio = false;
-  try { await L.put('borrador', Object.assign({}, B, { acumulado: segRec(), desde: null })); } catch (e) {}
+  try {
+    await L.put('borrador', Object.assign({}, B, { acumulado: segRec(), desde: null }));
+    if (B.parrafos.length || (B.texto || '').trim()) $('#rsave').textContent = '✓ Guardado en este equipo a las ' + new Date().toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  } catch (e) { $('#rsave').textContent = 'No se pudo guardar el borrador en este equipo.'; }
 }
 setInterval(guardarBorrador, 5000);
+// Algunos equipos no confirman el texto mientras el profesor habla sin pausas.
+// Cada 12 s sin confirmar, se cierra la escucha un instante para que lo confirme y se guarde.
+setInterval(() => {
+  if (R.grabando && R.corriendo && R.pend && R.pendDesde && Date.now() - R.pendDesde > 12000) {
+    R.forzado = true; R.pendDesde = 0;
+    try { R.rec && R.rec.stop(); } catch (e) {}
+  }
+}, 2000);
 function marcarCambio() { bCambio = true; actualizarDur(); }
 function borradorBanner() { $('#draft').hidden = !hayBorrador(); $('#draft-name').textContent = B.nombre || 'sin nombre'; }
 function actualizarDur() {
@@ -958,7 +1021,7 @@ function ponerSesion(texto) {
   if (!B.parrafos.length) live.innerHTML = '';
   if (interimEl) { interimEl.remove(); interimEl = null; }
   if (!seg) {
-    const u = B.parrafos[B.parrafos.length - 1]; const ahora = segRec();
+    const u = B.parrafos[B.parrafos.length - 1]; const ahora = R.habloEn != null ? Math.min(R.habloEn, segRec()) : segRec();
     if (u && !u.gap && ahora - u.t <= 50) { seg = u; segBase = u.texto; const ps = live.querySelectorAll('p:not(.interim):not(.gap)'); segEl = ps[ps.length - 1] || null; }
     else { seg = { t: ahora, texto: '' }; segBase = ''; B.parrafos.push(seg); segEl = nodoP(seg); live.appendChild(segEl); }
   }
@@ -966,6 +1029,7 @@ function ponerSesion(texto) {
   if (seg.texto === nuevo) return;
   seg.texto = nuevo;
   if (segEl && segEl.lastChild) segEl.lastChild.textContent = nuevo;
+  R.habloEn = null;
   marcarCambio();
   if (pegado) live.scrollTop = live.scrollHeight;
 }
@@ -981,7 +1045,7 @@ function crearRec() {
   r.lang = ls.get('cc_lang') || 'es-CO'; r.interimResults = true; r.maxAlternatives = 1;
   r.continuous = !ANDROID; // en Android el modo continuo repite frases; se reinicia frase por frase
   r.onstart = () => {
-    R.corriendo = true; R.intentos = 0; seg = null; segBase = ''; segEl = null;
+    R.corriendo = true; R.intentos = 0; seg = null; segBase = ''; segEl = null; R.fin = ''; R.pend = '';
     if (R.finCorte && R.grabando) {
       const corte = (Date.now() - R.finCorte) / 1000;
       if (corte > 15) { const hasta = segRec(), desde = hasta - corte; const p = { gap: true, t: desde, texto: `[sin transcripción entre ${fmtT(desde)} y ${fmtT(hasta)}]` }; B.parrafos.push(p); live.appendChild(nodoP(p)); seg = null; marcarCambio(); }
@@ -995,6 +1059,8 @@ function crearRec() {
     const f = reducir(fin); let it = reducir(pro);
     if (f) ponerSesion(f);
     if (it && f && nrm(it).startsWith(nrm(f))) it = it.slice(f.length).trim();
+    R.fin = f; R.pend = it;
+    if (it) { if (!R.pendDesde) { R.pendDesde = Date.now(); if (R.habloEn == null) R.habloEn = segRec(); } } else R.pendDesde = 0;
     interim(it);
   };
   r.onerror = (ev) => {
@@ -1003,7 +1069,11 @@ function crearRec() {
     else if (ev.error === 'network') rstate('Sin internet: la transcripción se reanuda sola al volver la conexión.', 'warn');
   };
   r.onend = () => {
-    R.corriendo = false; interim('');
+    R.corriendo = false;
+    // Si la sesión se cortó antes de confirmar el texto provisional, se guarda igual (antes se perdía).
+    if (R.pend) { ponerSesion(reducir([R.fin || '', R.pend])); }
+    R.fin = ''; R.pend = ''; R.pendDesde = 0; interim('');
+    if (R.forzado && R.grabando) { R.forzado = false; R.intentos = 0; R.finCorte = null; setTimeout(arrancarRec, 60); return; }
     if (!R.grabando) return;
     if (!R.finCorte) R.finCorte = Date.now();
     R.intentos++;
