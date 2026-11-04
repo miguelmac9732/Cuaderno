@@ -67,7 +67,7 @@ label.f > span { font-weight: 600; font-size: 0.92rem; }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .chip .n { opacity: .6; font-weight: 500; margin-left: 4px; font-variant-numeric: tabular-nums; }
 .chip.add { border-style: dashed; color: var(--accent); }
-.tag { display: inline-flex; align-items: center; font: 600 0.72rem var(--f-ui); padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--ink); }
+.tag { white-space: nowrap; flex: none; display: inline-flex; align-items: center; font: 600 0.72rem var(--f-ui); padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--ink); }
 .tag.ok { background: transparent; color: var(--ok); border: 1px solid var(--ok); }
 .tag.pend { background: transparent; color: var(--warn); border: 1px solid var(--warn); }
 .tag.run { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
@@ -164,6 +164,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     <a class="btn sm primary" href="#nueva">Continuar</a>
   </div>
   <h1>Mis clases</h1>
+  <a class="btn primary big" href="#preguntar" id="ir-preguntar" style="justify-content:flex-start">Pregúntale a tus clases</a>
   <div class="chips" id="chips" role="toolbar" aria-label="Grupos"></div>
   <div id="gtools"></div>
   <input type="search" id="buscar" placeholder="Buscar una clase por nombre" autocomplete="off">
@@ -243,6 +244,15 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
   </div>
   <p class="msg" id="c-msg" role="status" aria-live="polite"></p>
+  <form class="card" id="c-form" hidden style="display:flex;flex-direction:column;gap:12px">
+    <h2>Editar clase</h2>
+    <label class="f"><span>Nombre de la clase</span><input type="text" id="e-nombre" autocomplete="off"></label>
+    <label class="f"><span>Fecha</span><input type="date" id="e-fecha"></label>
+    <label class="f"><span>Transcripción</span><textarea id="e-tx" spellcheck="true" style="min-height:220px;font:0.92rem/1.6 var(--f-mono)"></textarea></label>
+    <label class="f"><span>Resumen gerencial</span><textarea id="e-res" spellcheck="true" style="min-height:180px;font:0.92rem/1.6 var(--f-mono)"></textarea></label>
+    <label class="row small"><input type="checkbox" id="e-regen"> Volver a generar los apuntes con la transcripción corregida (usa la IA)</label>
+    <div class="row"><button class="btn primary" type="submit" id="e-save">Guardar cambios</button><button class="btn" type="button" id="e-cancel">Cancelar</button></div>
+  </form>
   <article class="card">
     <div class="row" style="justify-content:space-between;margin-bottom:8px">
       <h2>Resumen gerencial</h2>
@@ -256,6 +266,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     <label class="btn" for="c-grupo" style="gap:8px">Grupo
       <select id="c-grupo" style="width:auto;padding:4px 8px;border:0;background:transparent"></select>
     </label>
+    <button class="btn" id="c-edit" type="button">Editar</button>
     <button class="btn danger" id="c-del" type="button">Eliminar</button>
   </div>
   <details class="box" id="c-det-box"><summary>Apuntes detallados</summary><div class="in notes" id="c-det"></div></details>
@@ -268,6 +279,30 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     <div class="notes" id="qa-ans" style="margin-top:10px"></div>
   </section>
   <details class="box" id="c-tx-box"><summary>Transcripción completa</summary><div class="in"><div class="row" style="margin-bottom:8px"><button class="btn sm" id="c-dltx" type="button">Descargar transcripción</button><button class="btn sm" id="c-punt" type="button" hidden>Corregir puntuación</button></div><pre id="c-tx">Cargando…</pre></div></details>
+</div></section>
+
+<!-- PREGUNTAR -->
+<section id="v-preguntar" hidden><div class="wrap">
+  <a class="btn link" href="#inicio">← Mis clases</a>
+  <div>
+    <h1>Pregúntale a tus clases</h1>
+    <p class="muted" style="margin:6px 0 0">Busca en todo lo que has grabado: apuntes y transcripciones completas.</p>
+  </div>
+  <form class="card" id="pq-form" style="display:flex;flex-direction:column;gap:12px">
+    <input type="search" id="pq-q" placeholder="Ej.: ¿Qué es el estado de cosas inconstitucional?" autocomplete="off">
+    <label class="f"><span>Buscar en</span><select id="pq-grupo"></select></label>
+    <div class="row">
+      <button class="btn primary" type="submit" id="pq-ia">Responder con IA</button>
+      <button class="btn" type="button" id="pq-buscar">Solo buscar (gratis)</button>
+    </div>
+    <button class="btn link" type="button" id="pq-dl" style="align-self:flex-start">Descargar todos los apuntes de este grupo en un archivo</button>
+  </form>
+  <p class="msg" id="pq-msg" role="status" aria-live="polite"></p>
+  <article class="card" id="pq-ans-box" hidden>
+    <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2>Respuesta</h2><button class="btn sm" id="pq-copy" type="button">Copiar</button></div>
+    <div class="notes" id="pq-ans"></div>
+  </article>
+  <div id="pq-res"></div>
 </div></section>
 
 <!-- AJUSTES -->
@@ -324,7 +359,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
     <p class="msg" id="a-resp-msg" role="status"></p>
   </section>
-  <p class="muted small">Cuaderno de Clase · versión 1.7</p>
+  <p class="muted small">Cuaderno de Clase · versión 1.8</p>
 </div></section>
 </main>
 
@@ -436,6 +471,7 @@ const Local = {
   async delClase(c) { await L.del('clases', c.id); await L.del('textos', c.id); await this.emitir(); },
   async putTextos(id, partes) { await L.put('textos', { id, partes }); },
   async putParte(id, i, texto) { const t = (await L.get('textos', id)) || { id, partes: [] }; t.partes[i] = texto; await L.put('textos', t); },
+  async delParte() { /* en el equipo, putTextos ya reemplaza todo */ },
   async getTextos(c) { const t = await L.get('textos', c.id); return (t && t.partes) || []; },
   detener() {},
 };
@@ -458,6 +494,7 @@ const Nube = {
   },
   async putTextos(id, partes) { for (let i = 0; i < partes.length; i++) await this.base().collection('textos').doc(`${id}_${i}`).set({ clase: id, i, texto: partes[i] }); },
   async putParte(id, i, texto) { await this.base().collection('textos').doc(`${id}_${i}`).set({ clase: id, i, texto }); },
+  async delParte(id, i) { await this.base().collection('textos').doc(`${id}_${i}`).delete(); },
   async getTextos(c) {
     const out = [];
     for (let i = 0; i < (c.nPartes || 1); i++) { const d = await this.base().collection('textos').doc(`${c.id}_${i}`).get(); if (d.exists) out.push(d.data().texto); }
@@ -704,7 +741,7 @@ async function procesar(c, soloPuntuar) {
 // ================= vistas =================
 function mostrar(v) {
   A.vista = v;
-  for (const s of ['inicio', 'nueva', 'clase', 'ajustes']) $('#v-' + s).hidden = s !== v;
+  for (const s of ['inicio', 'nueva', 'clase', 'ajustes', 'preguntar']) $('#v-' + s).hidden = s !== v;
   $('#fab').hidden = v !== 'inicio';
 }
 function ruta() {
@@ -712,6 +749,7 @@ function ruta() {
   if (h.startsWith('clase-')) { A.sel = h.slice(6); mostrar('clase'); }
   else if (h === 'nueva') mostrar('nueva');
   else if (h === 'ajustes') mostrar('ajustes');
+  else if (h === 'preguntar') mostrar('preguntar');
   else mostrar('inicio');
   render(); window.scrollTo(0, 0);
 }
@@ -721,6 +759,7 @@ function render() {
   else if (A.vista === 'nueva') renderGrupoSelect($('#n-grupo'), $('#n-grupo').value || ls.get('cc_ultimo_grupo') || '', true);
   else if (A.vista === 'clase') renderClase();
   else if (A.vista === 'ajustes') renderAjustes();
+  else if (A.vista === 'preguntar') renderPreguntar();
   renderCabecera();
 }
 function renderCabecera() {
@@ -812,6 +851,9 @@ function renderClase() {
   const c = claseDe(A.sel);
   if (!c) { $('#c-nombre').textContent = A.store.nombre === 'nube' && !(Nube.listo && Nube.listo.c) ? 'Cargando…' : 'Esta clase no existe'; $('#c-resumen').innerHTML = ''; return; }
   const run = A.job && A.job.id === c.id;
+  if (editando && editando !== c.id) { editando = null; }
+  $('#c-form').hidden = editando !== c.id;
+  $('#c-edit').hidden = run;
   $('#c-nombre').textContent = c.nombre;
   $('#c-meta').innerHTML = [grupoNombre(c.grupoId) && `<span class="tag">${esc(grupoNombre(c.grupoId))}</span>`, `<span>${esc(fmtFecha(c.fecha))}</span>`, `<span>≈ ${duracion(c.chars || 0)} de clase</span>`].filter(Boolean).join('');
   renderGrupoSelect($('#c-grupo'), c.grupoId || '', false);
@@ -833,6 +875,48 @@ function renderClase() {
   $('#c-punt').hidden = run || !!c.puntuada;
   if (!run) $('#c-det').innerHTML = md(det);
 }
+let editando = null;
+async function abrirEdicion() {
+  const c = claseDe(A.sel); if (!c) return;
+  if (A.job && A.job.id === c.id) { msg($('#c-msg'), 'Espera a que terminen los apuntes para editar.', 'warn'); return; }
+  editando = c.id;
+  $('#e-nombre').value = c.nombre || ''; $('#e-fecha').value = c.fecha || hoy();
+  $('#e-res').value = c.resumen || ''; $('#e-regen').checked = false;
+  $('#e-tx').value = 'Cargando…'; $('#e-tx').disabled = true;
+  $('#c-form').hidden = false; $('#c-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  try { $('#e-tx').value = (await textoDe(c)).join('\n\n'); } catch (e) { $('#e-tx').value = ''; msg($('#c-msg'), 'No se pudo cargar la transcripción. Revisa tu conexión.', 'bad'); }
+  $('#e-tx').disabled = false;
+}
+$('#c-edit').addEventListener('click', abrirEdicion);
+$('#e-cancel').addEventListener('click', () => { editando = null; $('#c-form').hidden = true; });
+$('#c-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const c0 = claseDe(A.sel); if (!c0 || editando !== c0.id) return;
+  const nombre = $('#e-nombre').value.trim();
+  if (!nombre) { msg($('#c-msg'), 'La clase necesita un nombre.', 'bad'); $('#e-nombre').focus(); return; }
+  const btn = $('#e-save'); btn.disabled = true; msg($('#c-msg'), 'Guardando cambios…');
+  try {
+    const c = Object.assign({}, c0, { notasPartes: [...(c0.notasPartes || [])], nombre, fecha: $('#e-fecha').value || c0.fecha, resumen: $('#e-res').value.trim() });
+    const antes = (await textoDe(c0)).join('\n\n').trim(), ahora = $('#e-tx').value.replace(/\r/g, '').trim();
+    if (ahora !== antes) {
+      if (ahora.length < 50) throw { corto: true };
+      const partes = dividir(ahora), viejas = c0.nPartes || 1;
+      await A.store.putTextos(c.id, partes);
+      for (let i = partes.length; i < viejas; i++) { try { await A.store.delParte(c.id, i); } catch (e) {} }
+      A.txCache[c.id] = partes; c.nPartes = partes.length; c.chars = ahora.length;
+    }
+    const regen = $('#e-regen').checked;
+    if (regen) { c.notasPartes = []; c.resumen = ''; c.estado = 'pendiente'; c.puntuada = true; c.pPunt = c.nPartes; }
+    else if (!c.resumen && c.estado === 'lista') c.estado = 'pendiente';
+    await A.store.putClase(c);
+    editando = null; $('#c-form').hidden = true;
+    msg($('#c-msg'), 'Cambios guardados.', 'ok');
+    render();
+    if (regen) procesar(c);
+  } catch (e) {
+    msg($('#c-msg'), e && e.corto ? 'La transcripción quedó casi vacía; no se guardó. Revisa el texto.' : 'No se pudieron guardar los cambios. Revisa tu conexión e inténtalo de nuevo.', 'bad');
+  } finally { btn.disabled = false; }
+});
 $('#c-gen').addEventListener('click', () => { const c = claseDe(A.sel); if (c) procesar(Object.assign({}, c, { notasPartes: [...(c.notasPartes || [])] })); });
 $('#c-stop').addEventListener('click', () => A.ctl && A.ctl.abort());
 $('#c-punt').addEventListener('click', () => { const c = claseDe(A.sel); if (c) { $('#c-tx-box').open = false; window.scrollTo(0, 0); procesar(Object.assign({}, c, { notasPartes: [...(c.notasPartes || [])] }), true); } });
@@ -872,12 +956,126 @@ $('#c-del').addEventListener('click', async (ev) => {
   b.disabled = false; b.textContent = 'Eliminar';
 });
 // preguntas
-function contexto(txt, q) {
-  if (txt.length <= 90000) return txt;
+// ================= base de conocimiento: preguntar a todas las clases =================
+const STOP = new Set('para como pero esta este esto estos estas sobre cual cuales donde cuando porque entre tiene tienen hace hacer dijo dice profesor profesora clase clases segun desde hasta todo toda todos todas puede pueden debe deben eran fueron sera seria tambien solo cada otro otra otros otras explica explico explicame significa quiere decir algo alguna alguno mismo misma tiene tenia hubo hay habia muchas muchos mucho mucha porque pues bueno entonces'.split(' '));
+const clavesDe = (q) => [...new Set(norm(q).split(/[^a-z0-9ñ]+/).filter((w) => w.length > 3 && !STOP.has(w)))];
+function puntaje(texto, ks) {
+  const n = norm(texto); let p = 0;
+  for (const k of ks) { let j = n.indexOf(k), c = 0; while (j !== -1 && c < 60) { c++; j = n.indexOf(k, j + k.length); } if (c) p += 1 + Math.log(c); }
+  return p;
+}
+function fragmento(texto, ks, largo = 320) {
+  const n = norm(texto); let pos = -1;
+  for (const k of ks) { const j = n.indexOf(k); if (j !== -1 && (pos === -1 || j < pos)) pos = j; }
+  if (pos === -1) return '';
+  const ini = Math.max(0, pos - 110), t = texto.slice(ini, ini + largo).replace(/\s+/g, ' ');
+  let h = esc((ini ? '…' : '') + t + '…');
+  for (const k of ks) h = h.replace(new RegExp('(' + k.split('').map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\u0300-\\u036f]?').join('') + ')', 'gi'), '<mark>$1</mark>');
+  return h;
+}
+let pqCargando = null;
+async function cargarTextos(clases) {
+  const faltan = clases.filter((c) => !A.txCache[c.id]);
+  let n = 0;
+  for (const c of faltan) {
+    try { A.txCache[c.id] = await A.store.getTextos(c); } catch (e) { A.txCache[c.id] = []; }
+    n++; if (faltan.length > 3) msg($('#pq-msg'), `Cargando tus clases… ${n} de ${faltan.length}`);
+  }
+}
+function clasesDelFiltro() {
+  const g = $('#pq-grupo').value;
+  return A.clases.filter((c) => !g || (g === 'sin' ? !grupoNombre(c.grupoId) : c.grupoId === g));
+}
+function renderPreguntar() {
+  const sel = $('#pq-grupo'), prev = sel.value || ls.get('cc_pq_grupo') || '';
+  sel.innerHTML = '<option value="">Todas mis clases (' + A.clases.length + ')</option>' + A.grupos.map((g) => `<option value="${esc(g.id)}">${esc(g.nombre)}</option>`).join('');
+  sel.value = [...sel.options].some((o) => o.value === prev) ? prev : '';
+  if (!A.clases.length) msg($('#pq-msg'), 'Todavía no tienes clases guardadas. Graba o sube una clase y aquí podrás preguntarle.', 'warn');
+}
+$('#pq-grupo').addEventListener('change', (e) => ls.set('cc_pq_grupo', e.target.value));
+async function buscarEnClases(q) {
+  const ks = clavesDe(q);
+  const clases = clasesDelFiltro();
+  if (!ks.length) return { ks, res: [] };
+  await cargarTextos(clases);
+  const res = clases.map((c) => {
+    const notas = ((c.resumen || '') + '\n\n' + (c.notasPartes || []).join('\n\n')).trim();
+    const tx = (A.txCache[c.id] || []).join('\n\n');
+    const p = puntaje(c.nombre, ks) * 3 + puntaje(notas, ks) * 2 + puntaje(tx, ks);
+    return { c, notas, tx, p };
+  }).filter((r) => r.p > 0).sort((a, b) => b.p - a.p);
+  return { ks, res };
+}
+function pintarResultados(ks, res) {
+  const box = $('#pq-res');
+  if (!res.length) { box.innerHTML = '<div class="empty">No encontré ese tema en tus clases. Prueba con otras palabras, por ejemplo el nombre de la norma o del concepto.</div>'; return; }
+  box.innerHTML = `<h2 style="margin:4px 0 10px">Clases donde aparece (${res.length})</h2><div class="list">` + res.slice(0, 20).map((r) => {
+    const gn = grupoNombre(r.c.grupoId);
+    const frag = fragmento(r.notas, ks) || fragmento(r.tx, ks);
+    return `<a class="item" href="#clase-${esc(r.c.id)}"><span class="t"><b>${esc(r.c.nombre)}</b>${r.c.estado === 'lista' ? '' : '<span class="tag pend">Sin apuntes</span>'}</span><span class="m">${gn ? `<span>${esc(gn)}</span>` : ''}<span>${esc(fmtFecha(r.c.fecha))}</span></span>${frag ? `<span class="small" style="color:var(--muted);line-height:1.5">${frag}</span>` : ''}</a>`;
+  }).join('') + '</div>';
+}
+let pqCtl = null;
+async function preguntarTodo(conIA) {
+  const q = $('#pq-q').value.trim();
+  if (!q) { msg($('#pq-msg'), 'Escribe tu pregunta o el tema que buscas.', 'warn'); $('#pq-q').focus(); return; }
+  if (conIA && !apiKey()) { msg($('#pq-msg'), errIA({ sinClave: true }).replace(' y vuelve a tocar «Generar apuntes»', ''), 'bad'); return; }
+  if (pqCtl) pqCtl.abort();
+  pqCtl = new AbortController();
+  const btns = [$('#pq-ia'), $('#pq-buscar')]; btns.forEach((b) => { b.disabled = true; });
+  $('#pq-ans-box').hidden = !conIA; $('#pq-ans').innerHTML = '<p class="wait">Buscando en tus clases…</p>';
+  msg($('#pq-msg'), 'Buscando…');
+  try {
+    const { ks, res } = await buscarEnClases(q);
+    msg($('#pq-msg'), '');
+    pintarResultados(ks, res);
+    if (!conIA) return;
+    if (!res.length) { $('#pq-ans').innerHTML = '<p>No encontré información sobre eso en tus clases.</p>'; return; }
+    // contexto: apuntes de las 4 clases más relacionadas + fragmentos de sus transcripciones
+    const top = res.slice(0, 4);
+    const bloques = top.map((r, i) => {
+      const gn = grupoNombre(r.c.grupoId);
+      const cab = `### Clase: ${r.c.nombre}${gn ? ' — ' + gn : ''} — ${fmtFecha(r.c.fecha)}`;
+      const notas = r.notas ? 'Apuntes:\n' + r.notas.slice(0, i < 2 ? 20000 : 10000) : '';
+      const frag = r.tx ? 'Fragmentos de la transcripción:\n' + contexto(r.tx, q, i < 2 ? 8 : 4, i < 2 ? 20000 : 10000) : '';
+      return [cab, notas, frag].filter(Boolean).join('\n\n');
+    }).join('\n\n---\n\n');
+    const prompt = `Eres un asistente de estudio. Responde la pregunta usando SOLO la información de las clases del estudiante que aparece abajo. No inventes nada que no esté ahí; si la información no alcanza para responder, dilo claramente.
+Responde en español, claro y directo, en Markdown:
+- Primero la respuesta en 2 a 6 frases.
+- Luego, si ayuda, los puntos clave en viñetas (normas, sentencias, autores, definiciones).
+- Al final escribe **Fuentes:** con el nombre y la fecha de las clases que usaste y, si la transcripción tiene marcas de tiempo [h:mm:ss], el momento.
+
+${bloques}
+
+Pregunta: ${q}`;
+    await llamar(prompt, { signal: pqCtl.signal, max: 6000, onText: (t) => { $('#pq-ans').innerHTML = md(t); } });
+  } catch (e) {
+    if (!e || !e.abort) { $('#pq-ans').innerHTML = ''; msg($('#pq-msg'), errIA(e).replace(/ Toca.*$/, ''), 'bad'); }
+  } finally { btns.forEach((b) => { b.disabled = false; }); }
+}
+$('#pq-dl').addEventListener('click', () => {
+  const clases = clasesDelFiltro().filter((c) => c.resumen).sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+  if (!clases.length) { msg($('#pq-msg'), 'No hay clases con apuntes en este grupo todavía.', 'warn'); return; }
+  const g = $('#pq-grupo').value, gn = g ? ($('#pq-grupo').selectedOptions[0] || {}).textContent : 'Todas mis clases';
+  const doc = `# Apuntes — ${gn}\n\n${clases.length} ${clases.length === 1 ? 'clase' : 'clases'}\n\n` + clases.map((c) => mdExport(c)).join('\n\n---\n\n');
+  bajar(`apuntes-${slug(gn)}.md`, doc.replace(/^# /gm, '## ').replace(/^## Apuntes —/, '# Apuntes —'), 'text/markdown');
+  msg($('#pq-msg'), `Descargado: ${clases.length} clases en un solo archivo.`, 'ok');
+});
+$('#pq-form').addEventListener('submit', (ev) => { ev.preventDefault(); preguntarTodo(true); });
+$('#pq-buscar').addEventListener('click', () => preguntarTodo(false));
+$('#pq-copy').addEventListener('click', async (ev) => {
+  const b = ev.currentTarget;
+  try { await navigator.clipboard.writeText($('#pq-ans').innerText); b.textContent = 'Copiado'; }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($('#pq-ans')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = 'Seleccionado'; }
+  setTimeout(() => { b.textContent = 'Copiar'; }, 2500);
+});
+function contexto(txt, q, maxV = 15, limite = 90000) {
+  if (txt.length <= limite) return txt;
   const claves = [...new Set(norm(q).split(/[^a-z0-9ñ]+/).filter((w) => w.length > 3))];
   const V = 3000, vent = [];
   for (let i = 0; i < txt.length; i += V) { const t = txt.slice(i, i + V), n = norm(t); let p = 0; for (const k of claves) { let j = n.indexOf(k); while (j !== -1) { p++; j = n.indexOf(k, j + k.length); } } vent.push({ i, t, p }); }
-  return vent.filter((v) => v.p > 0).sort((a, b) => b.p - a.p).slice(0, 15).sort((a, b) => a.i - b.i).map((v) => '…' + v.t + '…').join('\n\n') || '(no hay fragmentos con esas palabras)';
+  return vent.filter((v) => v.p > 0).sort((a, b) => b.p - a.p).slice(0, maxV).sort((a, b) => a.i - b.i).map((v) => '…' + v.t + '…').join('\n\n') || '(no hay fragmentos con esas palabras)';
 }
 let qaCtl = null;
 $('#qa-form').addEventListener('submit', async (ev) => {
