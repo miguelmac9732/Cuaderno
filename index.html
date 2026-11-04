@@ -317,7 +317,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
     <p class="msg" id="a-resp-msg" role="status"></p>
   </section>
-  <p class="muted small">Cuaderno de Clase · versión 1.0</p>
+  <p class="muted small">Cuaderno de Clase · versión 1.1</p>
 </div></section>
 </main>
 
@@ -333,7 +333,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
 const $ = (s) => document.querySelector(s);
 const PARTE = 35000;        // caracteres por parte (~40 min de clase)
 const MODELOS = { normal: 'claude-sonnet-5-5', economica: 'claude-haiku-5-5' };
-const ANDROID = /Android/i.test(navigator.userAgent);
+const ANDROID = /Android/i.test(navigator.userAgent) || (navigator.userAgentData && navigator.userAgentData.platform === 'Android') || (/Linux/i.test(navigator.userAgent) && navigator.maxTouchPoints > 0);
 
 // ================= utilidades =================
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -935,14 +935,37 @@ function pintarLive() {
   live.scrollTop = live.scrollHeight;
   $('#clock').textContent = fmtT(segRec());
 }
-function agregarFinal(t) {
-  t = t.trim(); if (!t) return;
-  const pegado = cercaFinal(); const ahora = segRec();
+// Chrome en Android/tablets entrega la misma frase varias veces, cada vez más larga.
+// Se reconstruye el texto de la sesión desde todos los resultados y se queda con la versión más completa de cada frase.
+let seg = null, segBase = '', segEl = null;
+const nrm = (s) => norm(s).replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim();
+function reducir(lista) {
+  const out = [];
+  for (const raw of lista) {
+    const t = String(raw || '').replace(/\s+/g, ' ').trim(); if (!t) continue;
+    if (out.length) {
+      const a = nrm(out[out.length - 1]), b = nrm(t);
+      if (b.startsWith(a)) { out[out.length - 1] = t; continue; }   // versión más larga de la misma frase
+      if (a.startsWith(b) || a.endsWith(b)) continue;               // repetición de algo ya escrito
+    }
+    out.push(t);
+  }
+  return out.join(' ');
+}
+function ponerSesion(texto) {
+  if (!texto) return;
+  const pegado = cercaFinal();
   if (!B.parrafos.length) live.innerHTML = '';
-  let u = B.parrafos[B.parrafos.length - 1];
   if (interimEl) { interimEl.remove(); interimEl = null; }
-  if (!u || u.gap || ahora - u.t > 50) { u = { t: ahora, texto: t }; B.parrafos.push(u); live.appendChild(nodoP(u)); }
-  else { u.texto += ' ' + t; const ps = live.querySelectorAll('p:not(.interim):not(.gap)'); const el = ps[ps.length - 1]; if (el && el.lastChild) el.lastChild.textContent = u.texto; }
+  if (!seg) {
+    const u = B.parrafos[B.parrafos.length - 1]; const ahora = segRec();
+    if (u && !u.gap && ahora - u.t <= 50) { seg = u; segBase = u.texto; const ps = live.querySelectorAll('p:not(.interim):not(.gap)'); segEl = ps[ps.length - 1] || null; }
+    else { seg = { t: ahora, texto: '' }; segBase = ''; B.parrafos.push(seg); segEl = nodoP(seg); live.appendChild(segEl); }
+  }
+  const nuevo = (segBase ? segBase + ' ' : '') + texto;
+  if (seg.texto === nuevo) return;
+  seg.texto = nuevo;
+  if (segEl && segEl.lastChild) segEl.lastChild.textContent = nuevo;
   marcarCambio();
   if (pegado) live.scrollTop = live.scrollHeight;
 }
@@ -958,15 +981,22 @@ function crearRec() {
   r.lang = ls.get('cc_lang') || 'es-CO'; r.interimResults = true; r.maxAlternatives = 1;
   r.continuous = !ANDROID; // en Android el modo continuo repite frases; se reinicia frase por frase
   r.onstart = () => {
-    R.corriendo = true; R.intentos = 0;
+    R.corriendo = true; R.intentos = 0; seg = null; segBase = ''; segEl = null;
     if (R.finCorte && R.grabando) {
       const corte = (Date.now() - R.finCorte) / 1000;
-      if (corte > 15) { const hasta = segRec(), desde = hasta - corte; const p = { gap: true, t: desde, texto: `[sin transcripción entre ${fmtT(desde)} y ${fmtT(hasta)}]` }; B.parrafos.push(p); live.appendChild(nodoP(p)); marcarCambio(); }
+      if (corte > 15) { const hasta = segRec(), desde = hasta - corte; const p = { gap: true, t: desde, texto: `[sin transcripción entre ${fmtT(desde)} y ${fmtT(hasta)}]` }; B.parrafos.push(p); live.appendChild(nodoP(p)); seg = null; marcarCambio(); }
     }
     R.finCorte = null;
     rstate('Grabando… deja la app abierta y la pantalla encendida.', 'live');
   };
-  r.onresult = (ev) => { let it = ''; for (let i = ev.resultIndex; i < ev.results.length; i++) { const x = ev.results[i]; if (x.isFinal) agregarFinal(x[0].transcript); else it += x[0].transcript; } interim(it); };
+  r.onresult = (ev) => {
+    const fin = [], pro = [];
+    for (let i = 0; i < ev.results.length; i++) { const x = ev.results[i]; (x.isFinal ? fin : pro).push(x[0].transcript); }
+    const f = reducir(fin); let it = reducir(pro);
+    if (f) ponerSesion(f);
+    if (it && f && nrm(it).startsWith(nrm(f))) it = it.slice(f.length).trim();
+    interim(it);
+  };
   r.onerror = (ev) => {
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { detenerRec(); msg($('#n-msg'), 'No hay permiso para el micrófono. Toca el candado junto a la dirección (o Ajustes del sistema → Apps → Chrome → Permisos), permite el micrófono y vuelve a tocar el botón rojo.', 'bad'); }
     else if (ev.error === 'audio-capture') msg($('#n-msg'), 'No se encontró micrófono. Revisa que esté conectado.', 'bad');
