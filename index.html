@@ -194,6 +194,10 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
         <div class="state small" id="rsave" style="color:var(--ok)"></div>
       </div>
     </div>
+    <div class="row" style="justify-content:space-between">
+      <button class="btn sm" id="punt-toggle" type="button" aria-pressed="false">Puntuación: apagada</button>
+      <span class="muted small" id="punt-hint">Se pone al generar los apuntes</span>
+    </div>
     <div class="livetext" id="live"><p class="muted">El texto aparece aquí mientras el profesor habla. Se guarda solo cada pocos segundos.</p></div>
   </div>
 
@@ -212,6 +216,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     <span class="muted small" id="n-dur">Sin texto todavía</span>
     <div class="row">
       <button class="btn link" id="n-descartar" type="button">Descartar</button>
+      <button class="btn big" id="n-guardar" type="button">Guardar clase</button>
       <button class="btn primary big" id="n-generar" type="button">Generar apuntes</button>
     </div>
   </div>
@@ -294,6 +299,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
 
   <section class="card set">
     <h2>Idioma de la clase</h2>
+    <label class="row small"><input type="checkbox" id="a-punt"> Poner puntos y comas mientras grabo (opcional; si está apagado, se ponen una sola vez al generar los apuntes)</label>
     <label class="f"><select id="a-lang">
       <option value="es-CO">Español (Colombia)</option>
       <option value="es-ES">Español (España)</option>
@@ -318,7 +324,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
     <p class="msg" id="a-resp-msg" role="status"></p>
   </section>
-  <p class="muted small">Cuaderno de Clase · versión 1.4</p>
+  <p class="muted small">Cuaderno de Clase · versión 1.7</p>
 </div></section>
 </main>
 
@@ -587,10 +593,20 @@ Transcripción:
 """
 ${tx}
 """`;
+function limpiarIA(text) {
+  return String(text || '')
+    .replace(/^\s*"{3}\s*|\s*"{3}\s*$/g, '')
+    .replace(/^\s*(aquí|aqui|claro|texto corregido|transcripción corregida|este es)[^\n]{0,80}:\s*\n?/i, '')
+    .replace(/^\s*["“”«»]+|["“”«»]+\s*$/g, '')
+    .trim();
+}
+const contarPal = (t) => nrm(t).split(' ').filter(Boolean).length;
+// acepta la versión corregida solo si conserva al menos el 85% de las palabras
+const conservaPalabras = (orig, nuevo) => contarPal(nuevo) >= contarPal(orig) * 0.85;
 async function puntuarParte(tx, opts) {
   const { text } = await llamar(pPuntuar(tx), Object.assign({}, opts, { max: 32000, model: MODELOS.economica }));
-  const t = text.replace(/^\s*"{3}\s*|\s*"{3}\s*$/g, '').trim();
-  return t.length >= tx.length * 0.7 ? t : tx; // si la respuesta salió recortada, se conserva el original
+  const t = limpiarIA(text);
+  return t && conservaPalabras(tx, t) ? t : tx; // si la respuesta salió recortada, se conserva el original
 }
 const pFinal = (c, det) => `Estos son los apuntes detallados, por partes, de una clase de aproximadamente ${duracion(c.chars)}.
 ${cab(c)}
@@ -906,6 +922,7 @@ function renderAjustes() {
   $('#a-key-sync-wrap').hidden = !u;
   $('#a-calidad').value = ls.get('cc_calidad') || 'normal';
   $('#a-lang').value = ls.get('cc_lang') || 'es-CO';
+  $('#a-punt').checked = puntVivo();
   $('#a-install').hidden = !A.instalar;
   $('#a-resp-txt').textContent = u ? 'Tus clases ya están guardadas en tu cuenta de Google. Igual puedes descargar una copia en un archivo.' : 'Tus clases están guardadas solo en este equipo. Descarga una copia de vez en cuando, o entra con Google para tenerlas en todos tus equipos.';
 }
@@ -925,6 +942,7 @@ $('#a-key-test').addEventListener('click', async () => {
 });
 $('#a-calidad').addEventListener('change', (e) => ls.set('cc_calidad', e.target.value));
 $('#a-lang').addEventListener('change', (e) => ls.set('cc_lang', e.target.value));
+$('#a-punt').addEventListener('change', (e) => { ls.set('cc_punt_vivo', e.target.checked ? 'si' : 'no'); pintarPuntBtn(); });
 $('#a-export').addEventListener('click', async () => {
   msg($('#a-resp-msg'), 'Preparando la copia…');
   try {
@@ -964,15 +982,15 @@ const hayBorrador = () => B.parrafos.length > 0 || (B.texto || '').trim().length
 async function guardarBorrador(forzar) {
   if (!bCambio && !forzar) return; bCambio = false;
   try {
-    await L.put('borrador', Object.assign({}, B, { acumulado: segRec(), desde: null }));
+    await L.put('borrador', Object.assign({}, B, { acumulado: segRec(), desde: null, pendiente: R.grabando ? (R.pend || '') : '', pendienteT: R.habloEn != null ? R.habloEn : segRec() }));
     if (B.parrafos.length || (B.texto || '').trim()) $('#rsave').textContent = '✓ Guardado en este equipo a las ' + new Date().toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
   } catch (e) { $('#rsave').textContent = 'No se pudo guardar el borrador en este equipo.'; }
 }
-setInterval(guardarBorrador, 5000);
+setInterval(() => { if (R.grabando && R.pend) bCambio = true; guardarBorrador(); }, 5000);
 // Algunos equipos no confirman el texto mientras el profesor habla sin pausas.
-// Cada 12 s sin confirmar, se cierra la escucha un instante para que lo confirme y se guarde.
+// Cada 45 s sin confirmar, se cierra la escucha un instante para que lo confirme y se guarde.
 setInterval(() => {
-  if (R.grabando && R.corriendo && R.pend && R.pendDesde && Date.now() - R.pendDesde > 12000) {
+  if (R.grabando && R.corriendo && R.pend && R.pendDesde && Date.now() - R.pendDesde > 45000) {
     R.forzado = true; R.pendDesde = 0;
     try { R.rec && R.rec.stop(); } catch (e) {}
   }
@@ -1003,18 +1021,80 @@ function pintarLive() {
 let seg = null, segBase = '', segEl = null;
 const nrm = (s) => norm(s).replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim();
 function reducir(lista) {
-  const out = [];
-  for (const raw of lista) {
-    const t = String(raw || '').replace(/\s+/g, ' ').trim(); if (!t) continue;
-    if (out.length) {
-      const a = nrm(out[out.length - 1]), b = nrm(t);
-      if (b.startsWith(a)) { out[out.length - 1] = t; continue; }   // versión más larga de la misma frase
-      if (a.startsWith(b) || a.endsWith(b)) continue;               // repetición de algo ya escrito
-    }
-    out.push(t);
+  const L = lista.map((t) => String(t || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (L.length <= 1) return L[0] || '';
+  const W = L.map(nrm);
+  // Android/tablets: cada resultado repite el anterior y le agrega palabras -> basta el último
+  let acumulativo = true;
+  for (let k = 1; k < L.length; k++) if (W[k] !== W[k - 1] && !(W[k] + ' ').startsWith(W[k - 1] + ' ')) { acumulativo = false; break; }
+  if (acumulativo) return L[L.length - 1];
+  // PC: frases distintas -> se unen todas; solo se quitan copias exactas seguidas
+  const out = [], ow = [];
+  for (let k = 0; k < L.length; k++) {
+    const w = W[k], u = ow.length - 1;
+    if (u >= 0 && w === ow[u]) continue;
+    if (u >= 0 && ow[u].split(' ').length >= 2 && (w + ' ').startsWith(ow[u] + ' ')) { out[u] = L[k]; ow[u] = w; continue; }
+    out.push(L[k]); ow.push(w);
   }
   return out.join(' ');
 }
+function quitarPrefijo(it, f) {
+  // quita del texto provisional las palabras que ya quedaron confirmadas, contando palabras (no letras)
+  const nf = nrm(f).split(' ').filter(Boolean).length, wi = it.split(' ');
+  for (let k = Math.max(1, nf - 2); k <= Math.min(wi.length, nf + 2); k++) if (nrm(wi.slice(0, k).join(' ')) === nrm(f)) return wi.slice(k).join(' ').trim();
+  return it;
+}
+// ---- puntuación en vivo (como las apps de transcripción comerciales) ----
+const pVivo = (tx) => `Pon puntuación a este fragmento de una clase dictada en español de Colombia${B.nombre ? ' (clase: ' + B.nombre + ')' : ''}, que viene de reconocimiento de voz automático.
+Agrega puntos, comas, signos de interrogación y exclamación (¿? ¡!), tildes y mayúsculas. Corrige solo palabras claramente mal reconocidas por el contexto y elimina palabras repetidas seguidas por error. No resumas, no quites ideas y no agregues nada. Devuelve solo el texto corregido, sin comillas ni comentarios.
+
+${tx}`;
+const PQ = []; let pqBusy = false, pqApagado = false;
+const puntVivo = () => ls.get('cc_punt_vivo') === 'si';
+function encolarPunt(p) {
+  if (!p || p.gap || p.ok || !p.texto || p.texto.length < 15) return;
+  if (pqApagado || !puntVivo() || !apiKey() || !navigator.onLine) return;
+  if (!PQ.includes(p)) PQ.push(p);
+  correrPQ();
+}
+async function correrPQ() {
+  if (pqBusy) return; pqBusy = true;
+  while (PQ.length) {
+    const p = PQ.shift(); const enviado = p.texto;
+    try {
+      const { text } = await llamarUna(pVivo(enviado), { max: 4000, model: MODELOS.economica });
+      const t = limpiarIA(text);
+      if (p.texto === enviado && t && conservaPalabras(enviado, t)) {
+        p.texto = t; p.ok = true;
+        const idx = B.parrafos.indexOf(p);
+        if (idx >= 0) { const el = live.querySelectorAll('p:not(.interim)')[idx]; if (el && el.lastChild) el.lastChild.textContent = t; }
+        if (seg === p) segBase = t;
+        marcarCambio();
+      }
+    } catch (e) {
+      // sin internet o sin clave: se corrige después, al generar apuntes
+      if (e && (e.status === 401 || e.status === 403 || /credit|balance/i.test(e.mensaje || ''))) { PQ.length = 0; pqApagado = true; }
+    }
+  }
+  pqBusy = false;
+}
+function pintarPuntBtn() {
+  const on = puntVivo(), b = $('#punt-toggle');
+  b.textContent = on ? 'Puntuación: encendida' : 'Puntuación: apagada';
+  b.setAttribute('aria-pressed', on); b.classList.toggle('primary', on);
+  $('#punt-hint').textContent = on ? 'Pone puntos y comas mientras grabas' : 'Se pone al generar los apuntes';
+}
+$('#punt-toggle').addEventListener('click', () => {
+  const on = !puntVivo();
+  if (on && !apiKey()) { msg($('#n-msg'), 'Para la puntuación necesitas la clave de IA. Pégala en Ajustes.', 'bad'); return; }
+  ls.set('cc_punt_vivo', on ? 'si' : 'no'); pqApagado = false; pintarPuntBtn();
+  if (on) {
+    // corrige de una vez lo que ya está escrito (menos el párrafo que se está escribiendo)
+    for (const x of B.parrafos) if (!R.grabando || x !== seg) encolarPunt(x);
+    msg($('#n-msg'), 'Puntuación encendida.', 'ok');
+  } else msg($('#n-msg'), 'Puntuación apagada: se pondrá al generar los apuntes.', 'ok');
+});
+async function esperarPQ(ms) { const fin = Date.now() + ms; while ((pqBusy || PQ.length) && Date.now() < fin) await esperar(300); }
 function ponerSesion(texto) {
   if (!texto) return;
   const pegado = cercaFinal();
@@ -1022,12 +1102,12 @@ function ponerSesion(texto) {
   if (interimEl) { interimEl.remove(); interimEl = null; }
   if (!seg) {
     const u = B.parrafos[B.parrafos.length - 1]; const ahora = R.habloEn != null ? Math.min(R.habloEn, segRec()) : segRec();
-    if (u && !u.gap && ahora - u.t <= 50) { seg = u; segBase = u.texto; const ps = live.querySelectorAll('p:not(.interim):not(.gap)'); segEl = ps[ps.length - 1] || null; }
-    else { seg = { t: ahora, texto: '' }; segBase = ''; B.parrafos.push(seg); segEl = nodoP(seg); live.appendChild(segEl); }
+    if (u && !u.gap && ahora - u.t <= 30) { seg = u; segBase = u.texto; const ps = live.querySelectorAll('p:not(.interim):not(.gap)'); segEl = ps[ps.length - 1] || null; }
+    else { const ant = u; seg = { t: ahora, texto: '' }; segBase = ''; B.parrafos.push(seg); segEl = nodoP(seg); live.appendChild(segEl); encolarPunt(ant); }
   }
   const nuevo = (segBase ? segBase + ' ' : '') + texto;
   if (seg.texto === nuevo) return;
-  seg.texto = nuevo;
+  seg.texto = nuevo; seg.ok = false;
   if (segEl && segEl.lastChild) segEl.lastChild.textContent = nuevo;
   R.habloEn = null;
   marcarCambio();
@@ -1058,7 +1138,7 @@ function crearRec() {
     for (let i = 0; i < ev.results.length; i++) { const x = ev.results[i]; (x.isFinal ? fin : pro).push(x[0].transcript); }
     const f = reducir(fin); let it = reducir(pro);
     if (f) ponerSesion(f);
-    if (it && f && nrm(it).startsWith(nrm(f))) it = it.slice(f.length).trim();
+    if (it && f && (nrm(it) + ' ').startsWith(nrm(f) + ' ')) it = quitarPrefijo(it, f);
     R.fin = f; R.pend = it;
     if (it) { if (!R.pendDesde) { R.pendDesde = Date.now(); if (R.habloEn == null) R.habloEn = segRec(); } } else R.pendDesde = 0;
     interim(it);
@@ -1100,6 +1180,7 @@ function detenerRec() {
   rstate(B.parrafos.length ? 'En pausa. Toca el botón rojo para seguir, o «Generar apuntes» si ya terminó la clase.' : 'Toca el botón rojo cuando empiece la clase.');
   if (R.wake) { R.wake.release().catch(() => {}); R.wake = null; }
   bCambio = true; guardarBorrador();
+  setTimeout(() => encolarPunt(B.parrafos[B.parrafos.length - 1]), 600);
 }
 $('#rec').addEventListener('click', () => R.grabando ? detenerRec() : iniciarRec());
 document.addEventListener('visibilitychange', () => {
@@ -1137,7 +1218,7 @@ $('#file').addEventListener('change', async (ev) => {
 function cargarFormulario() {
   $('#n-nombre').value = B.nombre || ''; $('#texto').value = B.texto || ''; $('#n-nuevo').value = B.nuevoGrupo || '';
   renderGrupoSelect($('#n-grupo'), B.grupoId || ls.get('cc_ultimo_grupo') || '', true);
-  modo(B.modo || 'grabar'); pintarLive(); actualizarDur();
+  modo(B.modo || 'grabar'); pintarLive(); actualizarDur(); pintarPuntBtn();
   rstate(B.parrafos.length ? 'En pausa. Toca el botón rojo para seguir grabando.' : 'Toca el botón rojo cuando empiece la clase.');
   if (!SR) { $('#rec').disabled = true; rstate('Este navegador no puede transcribir. Usa Chrome (Android o PC) o Edge (PC), o sube el texto.', 'warn'); }
 }
@@ -1150,20 +1231,23 @@ $('#n-descartar').addEventListener('click', async (ev) => {
   try { await L.del('borrador', 'actual'); } catch (e) {}
   b.textContent = 'Descartar'; cargarFormulario(); location.hash = 'inicio';
 });
-$('#n-generar').addEventListener('click', async () => {
+async function guardarDesdeBorrador(generar) {
   const nombre = $('#n-nombre').value.trim();
   if (!nombre) { msg($('#n-msg'), 'Escribe el nombre de la clase.', 'bad'); $('#n-nombre').focus(); return; }
   if ($('#n-grupo').value === '__nuevo' && !$('#n-nuevo').value.trim()) { msg($('#n-msg'), 'Escribe el nombre del grupo nuevo.', 'bad'); $('#n-nuevo').focus(); return; }
-  if (R.grabando) detenerRec();
+  if (R.grabando) { detenerRec(); await esperar(900); }
+  if (pqBusy || PQ.length) { msg($('#n-msg'), 'Terminando de poner la puntuación…'); await esperarPQ(15000); }
   const tx = textoTotal().trim();
   if (tx.length < 200) { msg($('#n-msg'), 'Todavía hay muy poco texto. Graba la clase o sube la transcripción.', 'bad'); return; }
-  const btn = $('#n-generar'); btn.disabled = true; msg($('#n-msg'), 'Guardando la clase…');
+  const btns = [$('#n-generar'), $('#n-guardar')]; btns.forEach((x) => { x.disabled = true; }); msg($('#n-msg'), 'Guardando la clase…');
   try {
     let grupoId = $('#n-grupo').value;
     if (grupoId === '__nuevo') grupoId = (await crearGrupo($('#n-nuevo').value.trim())).id;
     ls.set('cc_ultimo_grupo', grupoId);
     const partes = dividir(tx);
     const c = { id: nid(), nombre, grupoId, fecha: hoy(), creada: Date.now(), chars: tx.length, nPartes: partes.length, estado: 'pendiente', notasPartes: [], resumen: '' };
+    const habla = B.parrafos.filter((x) => !x.gap);
+    if (!(B.texto || '').trim() && habla.length && habla.every((x) => x.ok)) c.puntuada = true;
     A.txCache[c.id] = partes;
     await A.store.putTextos(c.id, partes);
     await A.store.putClase(c);
@@ -1171,11 +1255,14 @@ $('#n-generar').addEventListener('click', async () => {
     try { await L.del('borrador', 'actual'); } catch (e) {}
     cargarFormulario(); msg($('#n-msg'), '');
     location.hash = 'clase-' + c.id;
-    setTimeout(() => procesar(c), 50);
+    if (generar) setTimeout(() => procesar(c), 50);
+    else setTimeout(() => msg($('#c-msg'), A.user ? 'Clase guardada en tu cuenta. Genera los apuntes cuando quieras.' : 'Clase guardada en este equipo. Genera los apuntes cuando quieras.', 'ok'), 80);
   } catch (e) {
     msg($('#n-msg'), 'No se pudo guardar la clase. Tu texto sigue aquí; inténtalo de nuevo.', 'bad');
-  } finally { btn.disabled = false; }
-});
+  } finally { btns.forEach((x) => { x.disabled = false; }); }
+}
+$('#n-generar').addEventListener('click', () => guardarDesdeBorrador(true));
+$('#n-guardar').addEventListener('click', () => guardarDesdeBorrador(false));
 
 // ================= cuenta (Google / Firebase) =================
 async function entrar() {
@@ -1231,7 +1318,14 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.ser
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
 (async () => {
-  try { const b = await L.get('borrador', 'actual'); if (b) B = Object.assign(B, b, { desde: null }); } catch (e) {}
+  try {
+    const b = await L.get('borrador', 'actual');
+    if (b) {
+      B = Object.assign(B, b, { desde: null });
+      // texto que quedó sin confirmar cuando se cerró la app: se recupera
+      if (b.pendiente && b.pendiente.trim()) { B.parrafos.push({ t: b.pendienteT != null ? b.pendienteT : (B.acumulado || 0), texto: b.pendiente.trim() }); B.pendiente = ''; bCambio = true; }
+    }
+  } catch (e) {}
   cargarFormulario();
   ruta();
   iniciarCuenta();
