@@ -204,10 +204,11 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
 
   <div id="p-texto" class="card" hidden style="display:flex;flex-direction:column;gap:10px">
     <div class="row">
-      <label class="btn" for="file">Subir archivo .txt</label>
-      <input type="file" id="file" class="sr" accept=".txt,.md,.srt,.vtt,text/plain" multiple>
+      <label class="btn" for="file">Subir transcripción</label>
+      <input type="file" id="file" class="sr" accept=".docx,.vtt,.srt,.txt,.md,text/plain,text/vtt,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple>
       <span class="muted small">o pega el texto abajo</span>
     </div>
+    <p class="muted small" style="margin:0">¿Clase por Teams, Meet o Zoom? Al terminar descarga la transcripción (Word .docx o .vtt) y súbela aquí tal cual: la app la ordena sola.</p>
     <textarea id="texto" spellcheck="false" placeholder="Pega aquí la transcripción de la clase"></textarea>
   </div>
 
@@ -359,7 +360,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
     <p class="msg" id="a-resp-msg" role="status"></p>
   </section>
-  <p class="muted small">Cuaderno de Clase · versión 1.8</p>
+  <p class="muted small">Cuaderno de Clase · versión 1.9</p>
 </div></section>
 </main>
 
@@ -1318,6 +1319,19 @@ function interim(t) {
   interimEl.textContent = t; if (pegado) live.scrollTop = live.scrollHeight;
 }
 function rstate(t, k) { const el = $('#rstate'); el.textContent = t; el.className = 'state' + (k ? ' ' + k : ''); }
+async function micPermiso() {
+  try { const p = await navigator.permissions.query({ name: 'microphone' }); return p.state; } catch (e) { return 'desconocido'; }
+}
+function avisoMicOcupado() {
+  const el = $('#n-msg'); el.className = 'msg bad'; el.textContent = '';
+  const t = document.createElement('span');
+  t.textContent = 'El micrófono lo está usando otra app (Teams, Meet, Zoom, WhatsApp o una llamada). Android solo deja usarlo a una app a la vez. Si la clase es por Teams en este mismo equipo, al terminar descarga la transcripción de Teams y súbela aquí. ';
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'btn sm'; b.style.marginTop = '8px';
+  b.textContent = 'Subir transcripción de Teams';
+  b.addEventListener('click', () => { modo('texto'); msg(el, ''); $('#p-texto').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+  el.append(t, document.createElement('br'), b);
+  rstate(B.parrafos.length ? 'En pausa: el micrófono está ocupado por otra app.' : 'El micrófono está ocupado por otra app.', 'warn');
+}
 function crearRec() {
   const r = new SR();
   r.lang = ls.get('cc_lang') || 'es-CO'; r.interimResults = true; r.maxAlternatives = 1;
@@ -1335,6 +1349,7 @@ function crearRec() {
     const fin = [], pro = [];
     for (let i = 0; i < ev.results.length; i++) { const x = ev.results[i]; (x.isFinal ? fin : pro).push(x[0].transcript); }
     const f = reducir(fin); let it = reducir(pro);
+    if (f || pro.length) { R.huboTexto = true; R.errRed = 0; }
     if (f) ponerSesion(f);
     if (it && f && (nrm(it) + ' ').startsWith(nrm(f) + ' ')) it = quitarPrefijo(it, f);
     R.fin = f; R.pend = it;
@@ -1342,9 +1357,20 @@ function crearRec() {
     interim(it);
   };
   r.onerror = (ev) => {
-    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { detenerRec(); msg($('#n-msg'), 'No hay permiso para el micrófono. Toca el candado junto a la dirección (o Ajustes del sistema → Apps → Chrome → Permisos), permite el micrófono y vuelve a tocar el botón rojo.', 'bad'); }
-    else if (ev.error === 'audio-capture') msg($('#n-msg'), 'No se encontró micrófono. Revisa que esté conectado.', 'bad');
-    else if (ev.error === 'network') rstate('Sin internet: la transcripción se reanuda sola al volver la conexión.', 'warn');
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed' || ev.error === 'audio-capture') {
+      micPermiso().then((p) => {
+        if (!R.grabando) return;
+        if (p === 'granted' || (ev.error !== 'not-allowed' && p !== 'denied')) { detenerRec(); avisoMicOcupado(); }
+        else if (ev.error === 'audio-capture') { detenerRec(); msg($('#n-msg'), 'No se encontró micrófono. Revisa que esté conectado.', 'bad'); }
+        else { detenerRec(); msg($('#n-msg'), 'No hay permiso para el micrófono. Toca el candado junto a la dirección (o Ajustes del sistema → Apps → Chrome → Permisos), permite el micrófono y vuelve a tocar el botón rojo.', 'bad'); }
+      });
+    } else if (ev.error === 'network') {
+      if (navigator.onLine === false) { rstate('Sin internet: la transcripción se reanuda sola al volver la conexión.', 'warn'); return; }
+      // Hay internet pero el servicio de voz falla: casi siempre otra app (Teams, Meet, una llamada) tiene el micrófono.
+      R.errRed = (R.errRed || 0) + 1;
+      if (R.errRed >= (R.huboTexto ? 5 : 3)) { detenerRec(); avisoMicOcupado(); }
+      else rstate('No llega el audio… reintentando.', 'warn');
+    }
   };
   r.onend = () => {
     R.corriendo = false;
@@ -1364,7 +1390,7 @@ function arrancarRec() { if (!R.grabando || R.corriendo || document.hidden) retu
 async function pantalla() { try { if ('wakeLock' in navigator && !R.wake) { R.wake = await navigator.wakeLock.request('screen'); R.wake.addEventListener('release', () => { R.wake = null; }); } } catch (e) {} }
 function iniciarRec() {
   if (!SR) { msg($('#n-msg'), 'Este navegador no puede transcribir. Usa Google Chrome (Android o PC) o Microsoft Edge (PC).', 'bad'); return; }
-  R.grabando = true; R.finCorte = null; R.intentos = 0; B.desde = Date.now();
+  R.grabando = true; R.finCorte = null; R.intentos = 0; R.errRed = 0; R.huboTexto = false; B.desde = Date.now();
   $('#rec').classList.add('on'); $('#rec').setAttribute('aria-label', 'Pausar');
   msg($('#n-msg'), ''); pantalla(); arrancarRec();
   clearInterval(R.reloj); R.reloj = setInterval(() => { $('#clock').textContent = fmtT(segRec()); }, 1000);
@@ -1403,16 +1429,138 @@ $('#texto').addEventListener('input', (e) => { B.texto = e.target.value; marcarC
 $('#file').addEventListener('change', async (ev) => {
   const files = [...ev.target.files].sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true })); ev.target.value = '';
   if (!files.length) return;
-  let t = '';
-  for (const f of files) { try { t += (t ? '\n\n' : '') + await f.text(); } catch (e) { msg($('#n-msg'), `No pude leer «${f.name}».`, 'bad'); } }
-  t = t.replace(/\r/g, '');
-  if (/-->/.test(t)) t = t.split('\n').filter((l) => l.trim() && !/^\d+$/.test(l.trim()) && !/-->/.test(l) && !/^WEBVTT/.test(l)).join('\n');
-  B.texto = ((B.texto || '').trim() ? B.texto.trim() + '\n\n' : '') + t.trim();
-  $('#texto').value = B.texto;
-  if (!B.nombre && files.length === 1) { B.nombre = files[0].name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' '); $('#n-nombre').value = B.nombre; }
-  marcarCambio();
-  msg($('#n-msg'), files.length === 1 ? 'Archivo cargado.' : `${files.length} archivos cargados, en orden de nombre.`, 'ok');
+  let t = '', leidos = 0, errores = [];
+  msg($('#n-msg'), 'Leyendo…');
+  for (const f of files) {
+    try {
+      let x = /\.docx$/i.test(f.name) ? await leerDocx(f) : await f.text();
+      x = ordenarTranscripcion(x);
+      if (x.trim()) { t += (t ? '\n\n' : '') + x.trim(); leidos++; } else errores.push(f.name);
+    } catch (e) { errores.push(f.name); }
+  }
+  if (t) {
+    B.texto = ((B.texto || '').trim() ? B.texto.trim() + '\n\n' : '') + t.trim();
+    $('#texto').value = B.texto;
+    if (!B.nombre && files.length === 1) { B.nombre = nombreDeArchivo(files[0].name); $('#n-nombre').value = B.nombre; }
+    marcarCambio(); actualizarDur && actualizarDur();
+  }
+  if (errores.length) msg($('#n-msg'), `No pude leer: ${errores.join(', ')}. Si es un Word, ábrelo, copia todo el texto y pégalo abajo.`, 'bad');
+  else msg($('#n-msg'), leidos === 1 ? 'Transcripción cargada y ordenada. Revisa el nombre y toca «Guardar clase» o «Generar apuntes».' : `${leidos} archivos cargados, en orden de nombre.`, 'ok');
 });
+
+// ---- Transcripciones de Teams / Meet / Zoom (.docx, .vtt, .srt, .txt) ----
+function nombreDeArchivo(n) {
+  let s = n.replace(/\.[^.]+$/, '');
+  s = s.replace(/[-_ ]*\d{8}_\d{6}.*$/, '');            // Teams: -20261119_183800-Grabación de la reunión
+  s = s.replace(/\s*[-–(]?\s*(transcript(ion)?|transcripción|grabación de la reunión|meeting recording)\)?\s*$/i, '');
+  s = s.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return s || n;
+}
+async function inflar(datos, metodo) {
+  if (metodo === 0) return datos;
+  if (metodo !== 8 || typeof DecompressionStream === 'undefined') throw new Error('zip');
+  const st = new Blob([datos]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(st).arrayBuffer());
+}
+async function leerDocx(file) {
+  const buf = new Uint8Array(await file.arrayBuffer()); const dv = new DataView(buf.buffer);
+  let fin = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 66000); i--) if (dv.getUint32(i, true) === 0x06054b50) { fin = i; break; }
+  if (fin < 0) throw new Error('no es docx');
+  const n = dv.getUint16(fin + 10, true); let p = dv.getUint32(fin + 16, true); let xml = null;
+  for (let k = 0; k < n; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const met = dv.getUint16(p + 10, true), tam = dv.getUint32(p + 20, true);
+    const ln = dv.getUint16(p + 28, true), le = dv.getUint16(p + 30, true), lc = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
+    const nombre = new TextDecoder().decode(buf.subarray(p + 46, p + 46 + ln));
+    if (nombre === 'word/document.xml') {
+      const ini = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
+      xml = new TextDecoder().decode(await inflar(buf.subarray(ini, ini + tam), met)); break;
+    }
+    p += 46 + ln + le + lc;
+  }
+  if (!xml) throw new Error('sin documento');
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const lineas = [];
+  for (const par of doc.getElementsByTagName('w:p')) {
+    let s = '';
+    for (const nd of par.getElementsByTagName('*')) {
+      if (nd.tagName === 'w:t') s += nd.textContent;
+      else if (nd.tagName === 'w:tab') s += '\t';
+      else if (nd.tagName === 'w:br' || nd.tagName === 'w:cr') s += '\n';
+    }
+    lineas.push(s);
+  }
+  return lineas.join('\n');
+}
+function aSeg(h) { // "1:02:03", "0:03", "00:00:03.330", "0:0:3.33"
+  const m = String(h).trim().replace(',', '.').split(':').map(Number);
+  if (m.some((v) => isNaN(v))) return null;
+  return m.length === 3 ? m[0] * 3600 + m[1] * 60 + m[2] : m.length === 2 ? m[0] * 60 + m[1] : null;
+}
+const RUIDO = /^(WEBVTT|NOTE\b|Kind:|Language:)|\b(started|stopped) transcription\b|\b(inició|detuvo|ha iniciado|ha detenido) la transcripción\b/i;
+function ordenarTranscripcion(raw) {
+  const txt = String(raw || '').replace(/\r/g, '').replace(/ /g, ' ');
+  const L = txt.split('\n');
+  const items = []; // {t, who, text}
+  if (/-->/.test(txt)) {
+    // VTT / SRT / Teams antiguo: bloques con "inicio --> fin"
+    for (let i = 0; i < L.length; i++) {
+      const m = L[i].match(/^\s*(\d{1,2}:\d{1,2}:\d{1,2}(?:[.,]\d+)?|\d{1,2}:\d{2}(?:[.,]\d+)?)\s*-->/);
+      if (!m) continue;
+      const t = aSeg(m[1]); const cuerpo = [];
+      let j = i + 1;
+      while (j < L.length && L[j].trim() && !/-->/.test(L[j])) { cuerpo.push(L[j]); j++; }
+      // si la línea siguiente al bloque es solo un número/id y luego otro tiempo, se ignora sola
+      i = j - 1;
+      let who = '', partes = [];
+      for (let c of cuerpo) {
+        const v = c.match(/<v\s+([^>]+)>/); if (v) who = v[1].trim();
+        c = c.replace(/<[^>]+>/g, '').trim(); if (!c) continue;
+        partes.push(c);
+      }
+      // Teams antiguo: primera línea = nombre, resto = texto
+      if (!who && partes.length >= 2 && partes[0].length <= 50 && !/[.,;:?!¿¡]/.test(partes[0]) && partes[0].split(/\s+/).length <= 6) who = partes.shift();
+      let texto = partes.join(' ').trim();
+      const z = !who && texto.match(/^([^:]{2,50}):\s+(.+)$/); // Zoom: "Nombre: texto"
+      if (z && z[1].split(/\s+/).length <= 6) { who = z[1].trim(); texto = z[2]; }
+      if (texto && !RUIDO.test(texto)) items.push({ t, who, text: texto });
+    }
+  } else {
+    // Word de Teams ("Nombre   0:03" + texto) o Meet (marcas "00:05:00" + "Nombre: texto")
+    const cab = /^(.{2,60}?)(?:\t+|\s{2,}|\s)(\d{1,2}:\d{2}(?::\d{2})?)\s*$/;
+    const sola = /^\s*\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*$/;
+    const esNombre = (n) => n.split(/\s+/).length <= 6 && !/[.,;?!¿¡]$/.test(n) && !/[\[\]:]/.test(n);
+    const nCab = L.filter((l) => { const m = l.trim().match(cab); return m && esNombre(m[1]); }).length;
+    const nSola = L.filter((l) => sola.test(l)).length;
+    if (nCab < 3 && nSola < 2) return txt.trim(); // texto normal: se deja igual
+    let t = null, who = '';
+    for (const l0 of L) {
+      const l = l0.trim(); if (!l) continue;
+      const c = nCab >= 3 && l.match(cab);
+      if (c && esNombre(c[1])) { who = c[1].trim(); t = aSeg(c[2]); continue; }
+      const s = l.match(sola); if (s) { t = aSeg(s[1]); continue; }
+      if (RUIDO.test(l)) continue;
+      if (t == null) continue; // título, fecha y duración del encabezado
+      let w = who, texto = l;
+      const z = l.match(/^([^:]{2,50}):\s+(.+)$/); if (z && z[1].split(/\s+/).length <= 6) { w = z[1].trim(); texto = z[2]; }
+      items.push({ t, who: w, text: texto });
+    }
+  }
+  if (!items.length) return txt.trim();
+  // une frases seguidas de la misma persona (hasta ~1 min por párrafo)
+  const out = []; let cur = null, ultimo = '';
+  for (const it of items) {
+    if (cur && it.who === cur.who && (it.t == null || cur.t == null || it.t - cur.t <= 60)) { cur.text += ' ' + it.text; continue; }
+    if (cur) out.push(cur);
+    cur = { ...it };
+  }
+  if (cur) out.push(cur);
+  return out.map((p) => {
+    const quien = p.who && p.who !== ultimo ? p.who + ': ' : ''; if (p.who) ultimo = p.who;
+    return (p.t != null ? `[${fmtT(p.t)}] ` : '') + quien + p.text.replace(/\s+/g, ' ').trim();
+  }).join('\n');
+}
 function cargarFormulario() {
   $('#n-nombre').value = B.nombre || ''; $('#texto').value = B.texto || ''; $('#n-nuevo').value = B.nuevoGrupo || '';
   renderGrupoSelect($('#n-grupo'), B.grupoId || ls.get('cc_ultimo_grupo') || '', true);
