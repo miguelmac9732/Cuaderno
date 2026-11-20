@@ -212,6 +212,16 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     <textarea id="texto" spellcheck="false" placeholder="Pega aquí la transcripción de la clase"></textarea>
   </div>
 
+  <div class="card" style="display:flex;flex-direction:column;gap:8px">
+    <div class="row" style="justify-content:space-between"><b>Diapositivas <span class="muted small" style="font-weight:400">(opcional)</span></b><span class="muted small" id="n-dia-info"></span></div>
+    <p class="muted small" style="margin:0">PDF, PowerPoint (.pptx) o fotos de la pantalla. Puedes agregarlas ahora o después, desde la clase.</p>
+    <div class="row">
+      <label class="btn sm" for="n-dia-file">Agregar diapositivas</label>
+      <input type="file" id="n-dia-file" class="sr" accept=".pdf,.pptx,.ppt,image/*,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple>
+      <button class="btn link" id="n-dia-del" type="button" hidden>Quitar</button>
+    </div>
+    <p class="msg" id="n-dia-msg" role="status" aria-live="polite"></p>
+  </div>
   <p class="msg" id="n-msg" role="status" aria-live="polite"></p>
 
   <div class="bottombar">
@@ -270,6 +280,18 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     <button class="btn" id="c-edit" type="button">Editar</button>
     <button class="btn danger" id="c-del" type="button">Eliminar</button>
   </div>
+  <section class="card" id="c-dia" style="display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between"><h2>Diapositivas</h2><span class="muted small" id="c-dia-info"></span></div>
+    <p class="muted small" style="margin:0" id="c-dia-ayuda">Sube el PDF, el PowerPoint (.pptx) o fotos de las diapositivas. La IA las usa para hacer mejores apuntes y para responder tus preguntas.</p>
+    <div class="row">
+      <label class="btn" for="c-dia-file">Agregar diapositivas</label>
+      <input type="file" id="c-dia-file" class="sr" accept=".pdf,.pptx,.ppt,image/*,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple>
+      <button class="btn primary" id="c-dia-regen" type="button" hidden>Rehacer apuntes con las diapositivas</button>
+      <button class="btn link" id="c-dia-del" type="button" hidden>Quitar diapositivas</button>
+    </div>
+    <p class="msg" id="c-dia-msg" role="status" aria-live="polite"></p>
+    <details class="box" id="c-dia-box" hidden><summary>Ver texto de las diapositivas</summary><div class="in"><pre id="c-dia-tx">Cargando…</pre></div></details>
+  </section>
   <details class="box" id="c-det-box"><summary>Apuntes detallados</summary><div class="in notes" id="c-det"></div></details>
   <section class="card qa" id="c-qa">
     <h2 style="margin-bottom:8px">Pregúntale a tu clase</h2>
@@ -287,7 +309,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
   <a class="btn link" href="#inicio">← Mis clases</a>
   <div>
     <h1>Pregúntale a tus clases</h1>
-    <p class="muted" style="margin:6px 0 0">Busca en todo lo que has grabado: apuntes y transcripciones completas.</p>
+    <p class="muted" style="margin:6px 0 0">Busca en todo lo que has grabado: apuntes, transcripciones y diapositivas.</p>
   </div>
   <form class="card" id="pq-form" style="display:flex;flex-direction:column;gap:12px">
     <input type="search" id="pq-q" placeholder="Ej.: ¿Qué es el estado de cosas inconstitucional?" autocomplete="off">
@@ -360,7 +382,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
     <p class="msg" id="a-resp-msg" role="status"></p>
   </section>
-  <p class="muted small">Cuaderno de Clase · versión 1.9</p>
+  <p class="muted small">Cuaderno de Clase · versión 1.10</p>
 </div></section>
 </main>
 
@@ -469,11 +491,14 @@ const Local = {
   async putGrupo(g) { await L.put('grupos', g); await this.emitir(); },
   async delGrupo(id) { await L.del('grupos', id); await this.emitir(); },
   async putClase(c) { await L.put('clases', JSON.parse(JSON.stringify(c))); await this.emitir(); },
-  async delClase(c) { await L.del('clases', c.id); await L.del('textos', c.id); await this.emitir(); },
+  async delClase(c) { await L.del('clases', c.id); await L.del('textos', c.id); await L.del('textos', c.id + '__dia'); await this.emitir(); },
   async putTextos(id, partes) { await L.put('textos', { id, partes }); },
   async putParte(id, i, texto) { const t = (await L.get('textos', id)) || { id, partes: [] }; t.partes[i] = texto; await L.put('textos', t); },
   async delParte() { /* en el equipo, putTextos ya reemplaza todo */ },
   async getTextos(c) { const t = await L.get('textos', c.id); return (t && t.partes) || []; },
+  async putDiapos(id, texto) { await L.put('textos', { id: id + '__dia', partes: [texto] }); },
+  async getDiapos(c) { const t = await L.get('textos', c.id + '__dia'); return (t && t.partes && t.partes[0]) || ''; },
+  async delDiapos(id) { await L.del('textos', id + '__dia'); },
   detener() {},
 };
 const Nube = {
@@ -492,7 +517,11 @@ const Nube = {
   async delClase(c) {
     await this.base().collection('clases').doc(c.id).delete();
     for (let i = 0; i < (c.nPartes || 1); i++) await this.base().collection('textos').doc(`${c.id}_${i}`).delete();
+    if (c.diapos) await this.base().collection('textos').doc(`${c.id}_dia`).delete();
   },
+  async putDiapos(id, texto) { await this.base().collection('textos').doc(`${id}_dia`).set({ clase: id, dia: true, texto }); },
+  async getDiapos(c) { const d = await this.base().collection('textos').doc(`${c.id}_dia`).get(); return d.exists ? (d.data().texto || '') : ''; },
+  async delDiapos(id) { await this.base().collection('textos').doc(`${id}_dia`).delete(); },
   async putTextos(id, partes) { for (let i = 0; i < partes.length; i++) await this.base().collection('textos').doc(`${id}_${i}`).set({ clase: id, i, texto: partes[i] }); },
   async putParte(id, i, texto) { await this.base().collection('textos').doc(`${id}_${i}`).set({ clase: id, i, texto }); },
   async delParte(id, i) { await this.base().collection('textos').doc(`${id}_${i}`).delete(); },
@@ -509,7 +538,7 @@ function avisoNube(e) {
 }
 
 // ================= estado =================
-const A = { store: Local, user: null, grupos: [], clases: [], filtro: ls.get('cc_filtro') || 'todas', q: '', vista: 'inicio', sel: null, job: null, live: '', prog: { pct: 0, txt: '' }, ctl: null, txCache: {}, instalar: null, keyNube: '' };
+const A = { diaCache: {}, store: Local, user: null, grupos: [], clases: [], filtro: ls.get('cc_filtro') || 'todas', q: '', vista: 'inicio', sel: null, job: null, live: '', prog: { pct: 0, txt: '' }, ctl: null, txCache: {}, instalar: null, keyNube: '' };
 const grupoNombre = (id) => (A.grupos.find((g) => g.id === id) || {}).nombre || '';
 function alRecibir(grupos, clases) {
   A.grupos = grupos.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
@@ -592,20 +621,24 @@ const FORMATO = (maxP) => `## La clase en una frase
 ## Repaso rápido
 (5 preguntas numeradas con este formato exacto: 1. ¿Pregunta? || Respuesta breve)
 Sé conciso y directo, sin relleno: todo el resumen en máximo ${maxP} palabras.`;
-const pUnico = (c, tx) => `Haz los apuntes de estudio de esta clase.
+const bloqueDia = (dia, lim) => dia ? `
+
+Diapositivas que se mostraron en la clase (texto extraído de los archivos; "Notas del profesor" son las notas del presentador):
+"""
+${dia.length > lim ? dia.slice(0, lim) + '\n[…diapositivas recortadas…]' : dia}
+"""
+Usa las diapositivas para: corregir nombres, términos, normas y cifras mal reconocidos en la transcripción; seguir el orden de los temas; y completar definiciones, listas, tablas o datos que se mostraron aunque no se leyeran en voz alta. Lo que se dijo en clase (ejemplos, énfasis, lo que entra en el examen) sigue siendo lo principal. Si incluyes algo que está SOLO en las diapositivas, termina esa viñeta con (diapositiva).` : '';
+const pUnico = (c, tx, dia) => `Haz los apuntes de estudio de esta clase.
 ${cab(c)}
-${REGLAS}
+${tx ? REGLAS : 'No hay transcripción de esta clase: haz los apuntes SOLO con las diapositivas, explicando cada tema de forma clara para estudiar. Escribe en español de Colombia, en Markdown. En "Para el examen" pon lo que las diapositivas destacan (definiciones, listas, normas, cifras).'}
 
 Primero escribe el RESUMEN GERENCIAL con exactamente este formato:
 ${FORMATO(400)}
 
 Luego escribe una línea que diga exactamente ===DETALLE=== y después los apuntes detallados: un ### por cada subtema en el orden de la clase, con viñetas que incluyan definiciones, explicaciones, ejemplos, normas, sentencias, autores o fórmulas tal como se mencionaron.
 
-Transcripción:
-"""
-${tx}
-"""`;
-const pParte = (c, tx, i) => `Estás tomando apuntes de una clase larga, dividida en partes. Esta es la parte ${i + 1} de ${c.nPartes}${rango(tx)}.
+${tx ? 'Transcripción:\n"""\n' + tx + '\n"""' : ''}${bloqueDia(dia, 60000)}`;
+const pParte = (c, tx, i, dia) => `Estás tomando apuntes de una clase larga, dividida en partes. Esta es la parte ${i + 1} de ${c.nPartes}${rango(tx)}.
 ${cab(c)}
 ${REGLAS}
 Escribe SOLO esto:
@@ -616,7 +649,7 @@ No escribas resumen ni preguntas: eso se hace al final. Máximo unas 900 palabra
 Transcripción de esta parte:
 """
 ${tx}
-"""`;
+"""${dia ? bloqueDia(dia, 25000).replace('Usa las diapositivas para', 'Usa SOLO las diapositivas que correspondan a lo que se habla en esta parte para') : ''}`;
 const pPuntuar = (tx) => `Corrige la puntuación de esta transcripción automática de una clase, en español de Colombia.
 Reglas:
 - Agrega puntos, comas, signos de interrogación y exclamación (¿? ¡!), tildes y mayúsculas donde correspondan.
@@ -646,7 +679,7 @@ async function puntuarParte(tx, opts) {
   const t = limpiarIA(text);
   return t && conservaPalabras(tx, t) ? t : tx; // si la respuesta salió recortada, se conserva el original
 }
-const pFinal = (c, det) => `Estos son los apuntes detallados, por partes, de una clase de aproximadamente ${duracion(c.chars)}.
+const pFinal = (c, det, dia) => `Estos son los apuntes detallados, por partes, de una clase de aproximadamente ${duracion(c.chars)}.
 ${cab(c)}
 Con base SOLO en ellos, escribe el RESUMEN GERENCIAL de toda la clase, en español y en Markdown, con exactamente este formato:
 ${FORMATO(500)}
@@ -654,7 +687,7 @@ ${FORMATO(500)}
 Apuntes por partes:
 """
 ${det}
-"""`;
+"""${dia ? bloqueDia(dia, 25000).replace('Usa las diapositivas para: corregir nombres, términos, normas y cifras mal reconocidos en la transcripción; seguir el orden de los temas; y completar', 'Usa las diapositivas solo para corregir nombres y términos y para completar') : ''}`;
 
 // ================= generar apuntes =================
 function pintarJob() {
@@ -669,7 +702,7 @@ async function procesar(c, soloPuntuar) {
   if (!apiKey()) { msg($('#c-msg'), errIA({ sinClave: true }), 'bad'); return; }
   A.job = c; A.ctl = new AbortController(); A.live = ''; msg($('#c-msg'), '');
   const signal = A.ctl.signal;
-  const nPunt = c.puntuada ? 0 : c.nPartes - (c.pPunt || 0);
+  const nPunt = c.puntuada ? 0 : Math.max(0, (c.nPartes || 1) - (c.pPunt || 0));
   const nNotas = soloPuntuar ? 0 : (c.nPartes <= 1 ? 1 : c.nPartes + 1);
   const total = Math.max(1, nPunt + nNotas);
   const estadoBase = c.estado === 'lista' ? 'lista' : 'pendiente';
@@ -679,7 +712,9 @@ async function procesar(c, soloPuntuar) {
   try {
     let partes = A.txCache[c.id];
     if (!partes || !partes.length) partes = A.txCache[c.id] = await A.store.getTextos(c);
-    if (!partes.length) throw { mensaje: 'No encontré la transcripción de esta clase', status: 400 };
+    const dia = soloPuntuar ? '' : await diaposDe(c);
+    if (!partes.length && !dia) throw { mensaje: 'No encontré la transcripción ni diapositivas de esta clase', status: 400 };
+    if (!partes.length) { if (soloPuntuar) throw { mensaje: 'Esta clase no tiene transcripción', status: 400 }; c.puntuada = true; }
     c.estado = 'procesando';
     if (!c.puntuada) {
       for (let i = c.pPunt || 0; i < c.nPartes; i++) {
@@ -705,9 +740,9 @@ async function procesar(c, soloPuntuar) {
       return;
     }
     c.modelo = modelo();
-    if (c.nPartes <= 1) {
-      pasoN(0, 'Generando apuntes…');
-      const { text } = await llamar(pUnico(c, partes[0]), { signal, max: 16000, alReintentar, onText: (t) => { const [r, d] = separar(t); A.live = md(r) + (d ? '<h2>Apuntes detallados</h2>' + md(d) : ''); pintarJob(); } });
+    if (c.nPartes <= 1 || !partes.length) {
+      pasoN(0, dia ? 'Generando apuntes con la transcripción y las diapositivas…' : 'Generando apuntes…');
+      const { text } = await llamar(pUnico(c, partes[0] || '', dia), { signal, max: 16000, alReintentar, onText: (t) => { const [r, d] = separar(t); A.live = md(r) + (d ? '<h2>Apuntes detallados</h2>' + md(d) : ''); pintarJob(); } });
       const [r, d] = separar(text);
       c.resumen = r; c.notasPartes = d ? [d] : [];
     } else {
@@ -715,13 +750,13 @@ async function procesar(c, soloPuntuar) {
         const prev = c.notasPartes.join('\n\n');
         pasoN(i, `Apuntes: parte ${i + 1} de ${c.nPartes}${rango(partes[i])}. Se guarda al terminar cada parte.`);
         A.live = md(prev) + '<p class="wait">Leyendo esta parte…</p>'; pintarJob();
-        const { text } = await llamar(pParte(c, partes[i], i), { signal, alReintentar, onText: (t) => { A.live = md(prev + '\n\n' + t); pintarJob(); } });
+        const { text } = await llamar(pParte(c, partes[i], i, dia), { signal, alReintentar, onText: (t) => { A.live = md(prev + '\n\n' + t); pintarJob(); } });
         c.notasPartes = c.notasPartes.concat(text.trim());
         await A.store.putClase(Object.assign({}, c, { estado: 'pendiente' }));
       }
       pasoN(c.nPartes, 'Armando el resumen gerencial…');
       A.live = '<p class="wait">Armando el resumen gerencial…</p>'; pintarJob();
-      const { text } = await llamar(pFinal(c, c.notasPartes.join('\n\n')), { signal, max: 8000, alReintentar, onText: (t) => { A.live = md(t); pintarJob(); } });
+      const { text } = await llamar(pFinal(c, c.notasPartes.join('\n\n'), dia), { signal, max: 8000, alReintentar, onText: (t) => { A.live = md(t); pintarJob(); } });
       c.resumen = text.trim();
     }
     c.estado = 'lista';
@@ -824,7 +859,7 @@ function renderInicio() {
       const run = A.job && A.job.id === c.id;
       const tag = run ? '<span class="tag run">Generando</span>' : c.estado === 'lista' ? '<span class="tag ok">Apuntes listos</span>' : '<span class="tag pend">Sin apuntes</span>';
       const gn = grupoNombre(c.grupoId);
-      return `<a class="item" href="#clase-${esc(c.id)}"><span class="t"><b>${esc(c.nombre)}</b>${tag}</span><span class="m">${gn && A.filtro === 'todas' ? `<span>${esc(gn)}</span>` : ''}<span>${esc(fmtFecha(c.fecha))}</span><span>≈ ${duracion(c.chars || 0)}</span></span></a>`;
+      return `<a class="item" href="#clase-${esc(c.id)}"><span class="t"><b>${esc(c.nombre)}</b>${tag}</span><span class="m">${gn && A.filtro === 'todas' ? `<span>${esc(gn)}</span>` : ''}<span>${esc(fmtFecha(c.fecha))}</span>${c.chars ? `<span>≈ ${duracion(c.chars)}</span>` : ''}${c.diapos ? `<span>${c.diapos.n} diap.</span>` : ''}</span></a>`;
     }).join('') + '</div>';
   }
   borradorBanner();
@@ -856,7 +891,7 @@ function renderClase() {
   $('#c-form').hidden = editando !== c.id;
   $('#c-edit').hidden = run;
   $('#c-nombre').textContent = c.nombre;
-  $('#c-meta').innerHTML = [grupoNombre(c.grupoId) && `<span class="tag">${esc(grupoNombre(c.grupoId))}</span>`, `<span>${esc(fmtFecha(c.fecha))}</span>`, `<span>≈ ${duracion(c.chars || 0)} de clase</span>`].filter(Boolean).join('');
+  $('#c-meta').innerHTML = [grupoNombre(c.grupoId) && `<span class="tag">${esc(grupoNombre(c.grupoId))}</span>`, `<span>${esc(fmtFecha(c.fecha))}</span>`, c.chars ? `<span>≈ ${duracion(c.chars)} de clase</span>` : '', c.diapos && `<span>${c.diapos.n} diapositivas</span>`].filter(Boolean).join('');
   renderGrupoSelect($('#c-grupo'), c.grupoId || '', false);
   $('#c-modelo').textContent = '';
   if (run) { pintarJob(); }
@@ -871,11 +906,98 @@ function renderClase() {
     }
     $('#c-resumen').innerHTML = c.resumen ? md(c.resumen) : '<p class="wait">Aparecerá aquí cuando generes los apuntes.</p>';
   }
+  pintarDiaClase(c, run);
   const det = (c.notasPartes || []).join('\n\n');
   $('#c-det-box').hidden = run || !det;
   $('#c-punt').hidden = run || !!c.puntuada;
   if (!run) $('#c-det').innerHTML = md(det);
 }
+function infoDia(d) { return d ? `${d.n} ${d.n === 1 ? 'diapositiva' : 'diapositivas'} · ${d.archivos.join(', ')}` : ''; }
+let diaOcupado = false, diaNueva = null;
+function pintarDiaClase(c, run) {
+  const d = c.diapos;
+  $('#c-dia-info').textContent = infoDia(d);
+  $('#c-dia-box').hidden = !d; $('#c-dia-del').hidden = !d || run;
+  $('#c-dia-regen').hidden = !d || run || !(diaNueva === c.id && c.estado === 'lista');
+  $('#c-dia-ayuda').hidden = !!d;
+  document.querySelector('label[for="c-dia-file"]').textContent = d ? 'Agregar más diapositivas' : 'Agregar diapositivas';
+}
+$('#c-dia-file').addEventListener('change', async (ev) => {
+  const files = [...ev.target.files]; ev.target.value = '';
+  const c0 = claseDe(A.sel); if (!files.length || !c0) return;
+  if (diaOcupado) return; diaOcupado = true;
+  const m = $('#c-dia-msg'); const aviso = (t) => msg(m, t);
+  try {
+    const r = await leerDiapositivas(files, aviso);
+    if (!r.n) throw { sinNada: true, malos: r.malos };
+    const previo = await diaposDe(c0);
+    const texto = ((previo ? previo + '\n\n' : '') + r.texto).slice(0, LIM_DIA);
+    await A.store.putDiapos(c0.id, texto); A.diaCache[c0.id] = texto;
+    const d0 = c0.diapos || { n: 0, archivos: [] };
+    const c = Object.assign({}, claseDe(A.sel) || c0, { diapos: { n: d0.n + r.n, archivos: d0.archivos.concat(r.archivos), chars: texto.length } });
+    c.notasPartes = [...(c.notasPartes || [])];
+    await A.store.putClase(c);
+    diaNueva = c.id;
+    let t = `Listo: ${r.n} ${r.n === 1 ? 'diapositiva agregada' : 'diapositivas agregadas'}.`;
+    if (r.sinIA) t += ` ${r.sinIA} eran imágenes y no se pudieron leer porque falta tu clave de IA (Ajustes).`;
+    if (r.malos.length) t += ` No pude leer: ${r.malos.join(', ')}.`;
+    t += c.estado === 'lista' ? ' Toca «Rehacer apuntes con las diapositivas» para que los apuntes las usen.' : ' Se usarán al generar los apuntes.';
+    msg(m, t, r.malos.length || r.sinIA ? 'warn' : 'ok');
+    render();
+    if ($('#c-dia-box').open) $('#c-dia-tx').textContent = texto;
+  } catch (e) {
+    msg(m, e && e.sinNada ? `No encontré diapositivas en esos archivos${e.malos && e.malos.length ? ' (' + e.malos.join(', ') + ')' : ''}. Usa PDF, PowerPoint .pptx o fotos.` : (e && e.status != null ? errIA(e).replace(/ Toca.*$/, '') : 'No se pudieron leer las diapositivas. Revisa tu conexión e inténtalo de nuevo.'), 'bad');
+  } finally { diaOcupado = false; }
+});
+$('#c-dia-regen').addEventListener('click', () => {
+  const c0 = claseDe(A.sel); if (!c0) return;
+  diaNueva = null;
+  const c = Object.assign({}, c0, { notasPartes: [], resumen: '', estado: 'pendiente', puntuada: true });
+  msg($('#c-dia-msg'), ''); window.scrollTo(0, 0);
+  procesar(c);
+});
+let diaDelArm = 0;
+$('#c-dia-del').addEventListener('click', async (ev) => {
+  const b = ev.currentTarget, c0 = claseDe(A.sel); if (!c0) return;
+  if (Date.now() - diaDelArm > 4000) { diaDelArm = Date.now(); b.textContent = '¿Quitar? Toca otra vez'; setTimeout(() => { b.textContent = 'Quitar diapositivas'; }, 4000); return; }
+  try {
+    await A.store.delDiapos(c0.id); A.diaCache[c0.id] = '';
+    const c = Object.assign({}, c0, { notasPartes: [...(c0.notasPartes || [])] }); delete c.diapos;
+    await A.store.putClase(c); diaNueva = null;
+    msg($('#c-dia-msg'), 'Diapositivas quitadas. Los apuntes que ya tenías no cambian.', 'ok');
+  } catch (e) { msg($('#c-dia-msg'), 'No se pudieron quitar. Revisa tu conexión.', 'bad'); }
+  b.textContent = 'Quitar diapositivas';
+});
+$('#c-dia-box').addEventListener('toggle', async () => {
+  if (!$('#c-dia-box').open) return; const c = claseDe(A.sel); if (!c) return;
+  $('#c-dia-tx').textContent = 'Cargando…';
+  try { $('#c-dia-tx').textContent = (await diaposDe(c)) || 'No encontré el texto de las diapositivas.'; } catch (e) { $('#c-dia-tx').textContent = 'No se pudo cargar. Revisa tu conexión.'; }
+});
+// ---- diapositivas en «Nueva clase» ----
+function pintarDiaNueva() {
+  $('#n-dia-info').textContent = infoDia(B.diapos);
+  $('#n-dia-del').hidden = !B.diapos;
+  document.querySelector('label[for="n-dia-file"]').textContent = B.diapos ? 'Agregar más' : 'Agregar diapositivas';
+}
+$('#n-dia-file').addEventListener('change', async (ev) => {
+  const files = [...ev.target.files]; ev.target.value = ''; if (!files.length || diaOcupado) return;
+  diaOcupado = true; const m = $('#n-dia-msg');
+  try {
+    const r = await leerDiapositivas(files, (t) => msg(m, t));
+    if (!r.n) throw { sinNada: true, malos: r.malos };
+    const d0 = B.diapos || { n: 0, archivos: [], texto: '' };
+    B.diapos = { n: d0.n + r.n, archivos: d0.archivos.concat(r.archivos), texto: ((d0.texto ? d0.texto + '\n\n' : '') + r.texto).slice(0, LIM_DIA) };
+    bCambio = true; guardarBorrador();
+    let t = `${r.n} ${r.n === 1 ? 'diapositiva lista' : 'diapositivas listas'}.`;
+    if (r.sinIA) t += ` ${r.sinIA} eran imágenes y no se pudieron leer: falta tu clave de IA (Ajustes).`;
+    if (r.malos.length) t += ` No pude leer: ${r.malos.join(', ')}.`;
+    msg(m, t, r.malos.length || r.sinIA ? 'warn' : 'ok');
+    pintarDiaNueva(); actualizarDur();
+  } catch (e) {
+    msg(m, e && e.sinNada ? 'No encontré diapositivas en esos archivos. Usa PDF, PowerPoint .pptx o fotos.' : (e && e.status != null ? errIA(e).replace(/ Toca.*$/, '') : 'No se pudieron leer las diapositivas. Revisa tu conexión.'), 'bad');
+  } finally { diaOcupado = false; }
+});
+$('#n-dia-del').addEventListener('click', () => { B.diapos = null; bCambio = true; guardarBorrador(); msg($('#n-dia-msg'), ''); pintarDiaNueva(); actualizarDur(); });
 let editando = null;
 async function abrirEdicion() {
   const c = claseDe(A.sel); if (!c) return;
@@ -940,6 +1062,8 @@ $('#c-copy').addEventListener('click', async (ev) => {
 });
 $('#c-dl').addEventListener('click', () => { const c = claseDe(A.sel); if (c) bajar(`apuntes-${slug(c.nombre)}.md`, mdExport(c), 'text/markdown'); });
 async function textoDe(c) { if (!A.txCache[c.id]) A.txCache[c.id] = await A.store.getTextos(c); return A.txCache[c.id]; }
+async function diaposDe(c) { if (!c || !c.diapos) return ''; if (A.diaCache[c.id] == null) A.diaCache[c.id] = await A.store.getDiapos(c); return A.diaCache[c.id]; }
+const LIM_DIA = 280000; // tope de texto de diapositivas por clase
 $('#c-tx-box').addEventListener('toggle', async () => {
   if (!$('#c-tx-box').open) return; const c = claseDe(A.sel); if (!c) return;
   $('#c-tx').textContent = 'Cargando…';
@@ -976,10 +1100,11 @@ function fragmento(texto, ks, largo = 320) {
 }
 let pqCargando = null;
 async function cargarTextos(clases) {
-  const faltan = clases.filter((c) => !A.txCache[c.id]);
+  const faltan = clases.filter((c) => !A.txCache[c.id] || (c.diapos && A.diaCache[c.id] == null));
   let n = 0;
   for (const c of faltan) {
-    try { A.txCache[c.id] = await A.store.getTextos(c); } catch (e) { A.txCache[c.id] = []; }
+    try { if (!A.txCache[c.id]) A.txCache[c.id] = await A.store.getTextos(c); } catch (e) { A.txCache[c.id] = []; }
+    try { await diaposDe(c); } catch (e) { A.diaCache[c.id] = ''; }
     n++; if (faltan.length > 3) msg($('#pq-msg'), `Cargando tus clases… ${n} de ${faltan.length}`);
   }
 }
@@ -1002,8 +1127,9 @@ async function buscarEnClases(q) {
   const res = clases.map((c) => {
     const notas = ((c.resumen || '') + '\n\n' + (c.notasPartes || []).join('\n\n')).trim();
     const tx = (A.txCache[c.id] || []).join('\n\n');
-    const p = puntaje(c.nombre, ks) * 3 + puntaje(notas, ks) * 2 + puntaje(tx, ks);
-    return { c, notas, tx, p };
+    const dia = A.diaCache[c.id] || '';
+    const p = puntaje(c.nombre, ks) * 3 + puntaje(notas, ks) * 2 + puntaje(tx, ks) + puntaje(dia, ks);
+    return { c, notas, tx, dia, p };
   }).filter((r) => r.p > 0).sort((a, b) => b.p - a.p);
   return { ks, res };
 }
@@ -1012,7 +1138,7 @@ function pintarResultados(ks, res) {
   if (!res.length) { box.innerHTML = '<div class="empty">No encontré ese tema en tus clases. Prueba con otras palabras, por ejemplo el nombre de la norma o del concepto.</div>'; return; }
   box.innerHTML = `<h2 style="margin:4px 0 10px">Clases donde aparece (${res.length})</h2><div class="list">` + res.slice(0, 20).map((r) => {
     const gn = grupoNombre(r.c.grupoId);
-    const frag = fragmento(r.notas, ks) || fragmento(r.tx, ks);
+    const frag = fragmento(r.notas, ks) || fragmento(r.tx, ks) || fragmento(r.dia, ks);
     return `<a class="item" href="#clase-${esc(r.c.id)}"><span class="t"><b>${esc(r.c.nombre)}</b>${r.c.estado === 'lista' ? '' : '<span class="tag pend">Sin apuntes</span>'}</span><span class="m">${gn ? `<span>${esc(gn)}</span>` : ''}<span>${esc(fmtFecha(r.c.fecha))}</span></span>${frag ? `<span class="small" style="color:var(--muted);line-height:1.5">${frag}</span>` : ''}</a>`;
   }).join('') + '</div>';
 }
@@ -1039,7 +1165,8 @@ async function preguntarTodo(conIA) {
       const cab = `### Clase: ${r.c.nombre}${gn ? ' — ' + gn : ''} — ${fmtFecha(r.c.fecha)}`;
       const notas = r.notas ? 'Apuntes:\n' + r.notas.slice(0, i < 2 ? 20000 : 10000) : '';
       const frag = r.tx ? 'Fragmentos de la transcripción:\n' + contexto(r.tx, q, i < 2 ? 8 : 4, i < 2 ? 20000 : 10000) : '';
-      return [cab, notas, frag].filter(Boolean).join('\n\n');
+      const fd = r.dia ? 'Diapositivas de la clase:\n' + contexto(r.dia, q, i < 2 ? 4 : 2, i < 2 ? 12000 : 6000) : '';
+      return [cab, notas, frag, fd].filter(Boolean).join('\n\n');
     }).join('\n\n---\n\n');
     const prompt = `Eres un asistente de estudio. Responde la pregunta usando SOLO la información de las clases del estudiante que aparece abajo. No inventes nada que no esté ahí; si la información no alcanza para responder, dilo claramente.
 Responde en español, claro y directo, en Markdown:
@@ -1088,7 +1215,8 @@ $('#qa-form').addEventListener('submit', async (ev) => {
   $('#qa-go').disabled = true; ans.innerHTML = '<p class="wait">Buscando en la clase…</p>';
   try {
     const tx = (await textoDe(c)).join('\n\n');
-    const p = `Responde la pregunta del estudiante usando SOLO lo que se dijo en esta clase. Si no se habló de eso, dilo claramente. Si la transcripción tiene marcas de tiempo [h:mm:ss], indica en qué momento se habló del tema. Responde en español, breve y claro, en Markdown.
+    const dia = await diaposDe(c);
+    const p = `Responde la pregunta del estudiante usando SOLO lo que se dijo o se mostró en esta clase. Si no se habló de eso, dilo claramente. Si la transcripción tiene marcas de tiempo [h:mm:ss], indica en qué momento se habló del tema. Responde en español, breve y claro, en Markdown.
 ${cab(c)}
 
 Apuntes:
@@ -1099,7 +1227,7 @@ ${(c.resumen || '') + '\n\n' + (c.notasPartes || []).join('\n\n').slice(0, 60000
 Fragmentos de la transcripción:
 """
 ${contexto(tx, q)}
-"""
+"""${dia ? '\n\nDiapositivas:\n"""\n' + contexto(dia, q, 6, 30000) + '\n"""' : ''}
 
 Pregunta: ${q}`;
     await llamar(p, { signal: qaCtl.signal, max: 4000, onText: (t) => { ans.innerHTML = md(t); } });
@@ -1146,7 +1274,7 @@ $('#a-export').addEventListener('click', async () => {
   msg($('#a-resp-msg'), 'Preparando la copia…');
   try {
     const clases = [];
-    for (const c of A.clases) clases.push(Object.assign({}, c, { transcripcion: await A.store.getTextos(c) }));
+    for (const c of A.clases) clases.push(Object.assign({}, c, { transcripcion: await A.store.getTextos(c), diapositivas: c.diapos ? await A.store.getDiapos(c) : '' }));
     bajar(`cuaderno-de-clase-copia-${hoy()}.json`, JSON.stringify({ app: 'cuaderno-de-clase', version: 1, grupos: A.grupos, clases }), 'application/json');
     msg($('#a-resp-msg'), `Copia descargada: ${clases.length} clases.`, 'ok');
   } catch (e) { msg($('#a-resp-msg'), 'No se pudo preparar la copia. Revisa tu conexión.', 'bad'); }
@@ -1163,8 +1291,9 @@ $('#a-import').addEventListener('change', async (ev) => {
 async function importar(grupos, clases) {
   for (const g of grupos) if (!A.grupos.some((x) => x.id === g.id)) await A.store.putGrupo({ id: g.id, nombre: g.nombre, creada: g.creada || Date.now() });
   for (const c of clases) {
-    const { transcripcion, ...resto } = c;
+    const { transcripcion, diapositivas, ...resto } = c;
     if (transcripcion && transcripcion.length) await A.store.putTextos(c.id, transcripcion);
+    if (diapositivas) await A.store.putDiapos(c.id, diapositivas);
     await A.store.putClase(Object.assign(resto, { estado: resto.estado === 'procesando' ? 'pendiente' : resto.estado }));
   }
 }
@@ -1177,7 +1306,7 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const segRec = () => B.acumulado + (B.desde ? (Date.now() - B.desde) / 1000 : 0);
 const textoGrabado = () => B.parrafos.map((p) => p.gap ? p.texto : `[${fmtT(p.t)}] ${p.texto}`).join('\n');
 const textoTotal = () => [textoGrabado(), (B.texto || '').trim()].filter((x) => x.trim()).join('\n\n');
-const hayBorrador = () => B.parrafos.length > 0 || (B.texto || '').trim().length > 0;
+const hayBorrador = () => B.parrafos.length > 0 || (B.texto || '').trim().length > 0 || !!(B.diapos && B.diapos.n);
 async function guardarBorrador(forzar) {
   if (!bCambio && !forzar) return; bCambio = false;
   try {
@@ -1197,8 +1326,8 @@ setInterval(() => {
 function marcarCambio() { bCambio = true; actualizarDur(); }
 function borradorBanner() { $('#draft').hidden = !hayBorrador(); $('#draft-name').textContent = B.nombre || 'sin nombre'; }
 function actualizarDur() {
-  const n = textoTotal().length;
-  $('#n-dur').textContent = n ? `≈ ${duracion(n)} de clase` : 'Sin texto todavía';
+  const n = textoTotal().length, d = B.diapos && B.diapos.n;
+  $('#n-dur').textContent = (n ? `≈ ${duracion(n)} de clase` : (d ? 'Sin transcripción' : 'Sin texto todavía')) + (d ? ` · ${d} diapositivas` : '');
 }
 const live = $('#live'); let interimEl = null;
 const cercaFinal = () => live.scrollHeight - live.scrollTop - live.clientHeight < 120;
@@ -1323,14 +1452,15 @@ async function micPermiso() {
   try { const p = await navigator.permissions.query({ name: 'microphone' }); return p.state; } catch (e) { return 'desconocido'; }
 }
 function avisoMicOcupado() {
+  rstate('Esperando el micrófono… sigue intentando solo. Si otra app lo usa (Teams, WhatsApp, una llamada), ciérrala o súbele la transcripción después.', 'warn');
+  if (R.avisado) return; R.avisado = true;
   const el = $('#n-msg'); el.className = 'msg bad'; el.textContent = '';
   const t = document.createElement('span');
-  t.textContent = 'El micrófono lo está usando otra app (Teams, Meet, Zoom, WhatsApp o una llamada). Android solo deja usarlo a una app a la vez. Si la clase es por Teams en este mismo equipo, al terminar descarga la transcripción de Teams y súbela aquí. ';
+  t.textContent = 'No llega sonido del micrófono: puede que otra app lo esté usando (Teams, Meet, Zoom, WhatsApp o una llamada). La grabación sigue activa y continúa sola cuando el micrófono quede libre. Si la clase es por Teams en este mismo equipo, al terminar descarga la transcripción de Teams y súbela aquí. ';
   const b = document.createElement('button'); b.type = 'button'; b.className = 'btn sm'; b.style.marginTop = '8px';
   b.textContent = 'Subir transcripción de Teams';
-  b.addEventListener('click', () => { modo('texto'); msg(el, ''); $('#p-texto').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+  b.addEventListener('click', () => { if (R.grabando) detenerRec(); R.avisado = false; modo('texto'); msg(el, ''); $('#p-texto').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   el.append(t, document.createElement('br'), b);
-  rstate(B.parrafos.length ? 'En pausa: el micrófono está ocupado por otra app.' : 'El micrófono está ocupado por otra app.', 'warn');
 }
 function crearRec() {
   const r = new SR();
@@ -1349,7 +1479,7 @@ function crearRec() {
     const fin = [], pro = [];
     for (let i = 0; i < ev.results.length; i++) { const x = ev.results[i]; (x.isFinal ? fin : pro).push(x[0].transcript); }
     const f = reducir(fin); let it = reducir(pro);
-    if (f || pro.length) { R.huboTexto = true; R.errRed = 0; }
+    if (f || pro.length) { R.huboTexto = true; R.errRed = 0; if (R.avisado) { R.avisado = false; msg($('#n-msg'), ''); rstate('Grabando… deja la app abierta y la pantalla encendida.', 'live'); } }
     if (f) ponerSesion(f);
     if (it && f && (nrm(it) + ' ').startsWith(nrm(f) + ' ')) it = quitarPrefijo(it, f);
     R.fin = f; R.pend = it;
@@ -1360,15 +1490,14 @@ function crearRec() {
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed' || ev.error === 'audio-capture') {
       micPermiso().then((p) => {
         if (!R.grabando) return;
-        if (p === 'granted' || (ev.error !== 'not-allowed' && p !== 'denied')) { detenerRec(); avisoMicOcupado(); }
-        else if (ev.error === 'audio-capture') { detenerRec(); msg($('#n-msg'), 'No se encontró micrófono. Revisa que esté conectado.', 'bad'); }
-        else { detenerRec(); msg($('#n-msg'), 'No hay permiso para el micrófono. Toca el candado junto a la dirección (o Ajustes del sistema → Apps → Chrome → Permisos), permite el micrófono y vuelve a tocar el botón rojo.', 'bad'); }
+        // Solo se detiene si el permiso está realmente negado. En cualquier otro caso sigue intentando solo.
+        if (ev.error === 'not-allowed' && p === 'denied') { detenerRec(); msg($('#n-msg'), 'No hay permiso para el micrófono. Toca el candado junto a la dirección (o Ajustes del sistema → Apps → Chrome → Permisos), permite el micrófono y vuelve a tocar el botón rojo.', 'bad'); }
+        else avisoMicOcupado();
       });
     } else if (ev.error === 'network') {
       if (navigator.onLine === false) { rstate('Sin internet: la transcripción se reanuda sola al volver la conexión.', 'warn'); return; }
-      // Hay internet pero el servicio de voz falla: casi siempre otra app (Teams, Meet, una llamada) tiene el micrófono.
       R.errRed = (R.errRed || 0) + 1;
-      if (R.errRed >= (R.huboTexto ? 5 : 3)) { detenerRec(); avisoMicOcupado(); }
+      if (R.errRed >= 3) avisoMicOcupado();
       else rstate('No llega el audio… reintentando.', 'warn');
     }
   };
@@ -1390,7 +1519,7 @@ function arrancarRec() { if (!R.grabando || R.corriendo || document.hidden) retu
 async function pantalla() { try { if ('wakeLock' in navigator && !R.wake) { R.wake = await navigator.wakeLock.request('screen'); R.wake.addEventListener('release', () => { R.wake = null; }); } } catch (e) {} }
 function iniciarRec() {
   if (!SR) { msg($('#n-msg'), 'Este navegador no puede transcribir. Usa Google Chrome (Android o PC) o Microsoft Edge (PC).', 'bad'); return; }
-  R.grabando = true; R.finCorte = null; R.intentos = 0; R.errRed = 0; R.huboTexto = false; B.desde = Date.now();
+  R.grabando = true; R.finCorte = null; R.intentos = 0; R.errRed = 0; R.huboTexto = false; R.avisado = false; B.desde = Date.now();
   $('#rec').classList.add('on'); $('#rec').setAttribute('aria-label', 'Pausar');
   msg($('#n-msg'), ''); pantalla(); arrancarRec();
   clearInterval(R.reloj); R.reloj = setInterval(() => { $('#clock').textContent = fmtT(segRec()); }, 1000);
@@ -1462,25 +1591,32 @@ async function inflar(datos, metodo) {
   const st = new Blob([datos]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(st).arrayBuffer());
 }
-async function leerDocx(file) {
-  const buf = new Uint8Array(await file.arrayBuffer()); const dv = new DataView(buf.buffer);
+function zipEntradas(buf) {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   let fin = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 66000); i--) if (dv.getUint32(i, true) === 0x06054b50) { fin = i; break; }
-  if (fin < 0) throw new Error('no es docx');
-  const n = dv.getUint16(fin + 10, true); let p = dv.getUint32(fin + 16, true); let xml = null;
+  if (fin < 0) throw new Error('no es zip');
+  const n = dv.getUint16(fin + 10, true); let p = dv.getUint32(fin + 16, true); const out = {};
   for (let k = 0; k < n; k++) {
     if (dv.getUint32(p, true) !== 0x02014b50) break;
     const met = dv.getUint16(p + 10, true), tam = dv.getUint32(p + 20, true);
     const ln = dv.getUint16(p + 28, true), le = dv.getUint16(p + 30, true), lc = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
-    const nombre = new TextDecoder().decode(buf.subarray(p + 46, p + 46 + ln));
-    if (nombre === 'word/document.xml') {
-      const ini = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
-      xml = new TextDecoder().decode(await inflar(buf.subarray(ini, ini + tam), met)); break;
-    }
+    out[new TextDecoder().decode(buf.subarray(p + 46, p + 46 + ln))] = { met, tam, off };
     p += 46 + ln + le + lc;
   }
-  if (!xml) throw new Error('sin documento');
-  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  return out;
+}
+async function zipTexto(buf, ent) {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const ini = ent.off + 30 + dv.getUint16(ent.off + 26, true) + dv.getUint16(ent.off + 28, true);
+  return new TextDecoder().decode(await inflar(buf.subarray(ini, ini + ent.tam), ent.met));
+}
+const xmlDe = (t) => new DOMParser().parseFromString(t, 'application/xml');
+async function leerDocx(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const E = zipEntradas(buf);
+  if (!E['word/document.xml']) throw new Error('sin documento');
+  const doc = xmlDe(await zipTexto(buf, E['word/document.xml']));
   const lineas = [];
   for (const par of doc.getElementsByTagName('w:p')) {
     let s = '';
@@ -1492,6 +1628,128 @@ async function leerDocx(file) {
     lineas.push(s);
   }
   return lineas.join('\n');
+}
+// ---- Diapositivas: PowerPoint (.pptx), PDF y fotos ----
+const textoA = (doc) => [...doc.getElementsByTagName('a:p')].map((par) => [...par.getElementsByTagName('a:t')].map((t) => t.textContent).join('')).filter((l) => l.trim()).join('\n');
+async function leerPptx(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const E = zipEntradas(buf);
+  const slides = Object.keys(E).filter((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a, b) => +a.match(/(\d+)\.xml$/)[1] - +b.match(/(\d+)\.xml$/)[1]);
+  if (!slides.length) throw new Error('sin diapositivas');
+  // orden real de presentación (presentation.xml), si existe
+  let orden = slides;
+  try {
+    const pres = xmlDe(await zipTexto(buf, E['ppt/presentation.xml']));
+    const rels = xmlDe(await zipTexto(buf, E['ppt/_rels/presentation.xml.rels']));
+    const mapa = {}; for (const r of rels.getElementsByTagName('Relationship')) mapa[r.getAttribute('Id')] = 'ppt/' + r.getAttribute('Target').replace(/^\/?ppt\//, '').replace(/^\.\.\//, '');
+    const ids = [...pres.getElementsByTagName('p:sldId')].map((x) => mapa[x.getAttribute('r:id')]).filter((k) => k && E[k]);
+    if (ids.length) orden = ids;
+  } catch (e) {}
+  const out = [];
+  for (let i = 0; i < orden.length; i++) {
+    const k = orden[i];
+    let t = textoA(xmlDe(await zipTexto(buf, E[k])));
+    try {
+      const rk = k.replace('slides/', 'slides/_rels/') + '.rels';
+      if (E[rk]) {
+        const rel = [...xmlDe(await zipTexto(buf, E[rk])).getElementsByTagName('Relationship')].find((r) => /notesSlide/.test(r.getAttribute('Type') || ''));
+        const nk = rel && 'ppt/' + rel.getAttribute('Target').replace(/^\.\.\//, '');
+        if (nk && E[nk]) { const nt = textoA(xmlDe(await zipTexto(buf, E[nk]))).replace(/^\s*\d+\s*$/gm, '').trim(); if (nt.length > 3) t += '\nNotas del profesor: ' + nt; }
+      }
+    } catch (e) {}
+    out.push({ n: i + 1, texto: t.trim() });
+  }
+  return out;
+}
+let pdfjsP = null;
+function cargarPdfjs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (!pdfjsP) pdfjsP = new Promise((ok, ko) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    sc.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; ok(window.pdfjsLib); };
+    sc.onerror = () => { pdfjsP = null; ko(new Error('sin internet')); };
+    document.head.appendChild(sc);
+  });
+  return pdfjsP;
+}
+function canvasAJpeg(cv) { return cv.toDataURL('image/jpeg', 0.72).split(',')[1]; }
+async function leerPdf(file, aviso) {
+  const lib = await cargarPdfjs();
+  const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const out = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    aviso && aviso(`Leyendo «${file.name}»: página ${i} de ${pdf.numPages}…`);
+    const pg = await pdf.getPage(i);
+    const tc = await pg.getTextContent();
+    let t = ''; for (const it of tc.items) { t += it.str; t += it.hasEOL ? '\n' : ' '; }
+    t = t.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    const d = { n: i, texto: t };
+    if (t.replace(/\s/g, '').length < 25 && out.filter((x) => x.img).length < 60) { // página que es una imagen: se lee con IA
+      const vp = pg.getViewport({ scale: 1 }); const esc2 = Math.min(2, 1400 / Math.max(vp.width, vp.height));
+      const v2 = pg.getViewport({ scale: esc2 }); const cv = document.createElement('canvas'); cv.width = v2.width; cv.height = v2.height;
+      await pg.render({ canvasContext: cv.getContext('2d'), viewport: v2 }).promise;
+      d.img = canvasAJpeg(cv);
+    }
+    out.push(d);
+  }
+  return out;
+}
+function leerImagen(file) {
+  return new Promise((ok, ko) => {
+    const url = URL.createObjectURL(file); const im = new Image();
+    im.onload = () => { const k = Math.min(1, 1500 / Math.max(im.width, im.height)); const cv = document.createElement('canvas'); cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k); cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url); ok([{ n: 1, texto: '', img: canvasAJpeg(cv) }]); };
+    im.onerror = () => { URL.revokeObjectURL(url); ko(new Error('imagen')); };
+    im.src = url;
+  });
+}
+async function ocrDiapos(items, aviso, signal) {
+  // lee con IA (modelo económico) las diapositivas que son imagen, de 6 en 6
+  const conImg = items.filter((d) => d.img);
+  for (let i = 0; i < conImg.length; i += 6) {
+    const lote = conImg.slice(i, i + 6);
+    aviso && aviso(`Leyendo con IA las diapositivas en imagen… ${Math.min(i + 6, conImg.length)} de ${conImg.length}`);
+    const content = [];
+    lote.forEach((d, j) => { content.push({ type: 'text', text: `Imagen ${j + 1}:` }); content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: d.img } }); });
+    content.push({ type: 'text', text: `Son ${lote.length} diapositivas (o fotos de diapositivas) de una clase. Para cada imagen escribe exactamente:\n=== Imagen N ===\ny debajo todo el texto que se lee en ella, en orden (títulos, viñetas, tablas como líneas "col1 | col2"). Si hay un gráfico, diagrama o esquema, descríbelo en una o dos líneas empezando con "Gráfico:". Si la foto muestra otra cosa además de la diapositiva, ignórala. No agregues nada más.` });
+    const { text } = await llamar(content, { signal, max: 6000, model: MODELOS.economica });
+    const trozos = text.split(/^=+\s*Imagen\s+(\d+)\s*=+\s*$/m);
+    for (let k = 1; k < trozos.length; k += 2) { const d = lote[+trozos[k] - 1]; if (d) d.texto = trozos[k + 1].trim(); }
+    if (trozos.length < 2 && lote.length === 1) lote[0].texto = text.trim();
+  }
+  for (const d of items) delete d.img;
+}
+// Devuelve { texto, n, archivos } a partir de los archivos elegidos.
+async function leerDiapositivas(files, aviso) {
+  const res = []; const malos = [];
+  files = [...files].sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
+  const fotos = files.filter((f) => /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name));
+  for (const f of files) {
+    if (fotos.includes(f)) continue;
+    try {
+      aviso && aviso(`Leyendo «${f.name}»…`);
+      let items;
+      if (/\.pptx$/i.test(f.name)) items = await leerPptx(f);
+      else if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf') items = await leerPdf(f, aviso);
+      else if (/\.ppt$/i.test(f.name)) { malos.push(f.name + ' (PowerPoint antiguo: guárdalo como .pptx o PDF)'); continue; }
+      else { malos.push(f.name); continue; }
+      res.push({ nombre: f.name, items });
+    } catch (e) { malos.push(f.name + (e && /internet/.test(e.message) ? ' (sin internet)' : '')); }
+  }
+  if (fotos.length) {
+    const items = [];
+    for (const f of fotos) { try { const [d] = await leerImagen(f); d.n = items.length + 1; items.push(d); } catch (e) { malos.push(f.name); } }
+    if (items.length) res.push({ nombre: fotos.length === 1 ? fotos[0].name : `${items.length} fotos`, items });
+  }
+  const todas = res.flatMap((r) => r.items);
+  const faltaIA = todas.some((d) => d.img);
+  let sinIA = 0;
+  if (faltaIA) {
+    if (apiKey()) await ocrDiapos(todas, aviso);
+    else { sinIA = todas.filter((d) => d.img).length; for (const d of todas) delete d.img; }
+  }
+  const texto = res.map((r) => `=== ${r.nombre} ===\n` + r.items.map((d) => `--- Diapositiva ${d.n} ---\n${d.texto || '(sin texto)'}`).join('\n\n')).join('\n\n');
+  return { texto, n: todas.length, archivos: res.map((r) => r.nombre), malos, sinIA };
 }
 function aSeg(h) { // "1:02:03", "0:03", "00:00:03.330", "0:0:3.33"
   const m = String(h).trim().replace(',', '.').split(':').map(Number);
@@ -1564,7 +1822,7 @@ function ordenarTranscripcion(raw) {
 function cargarFormulario() {
   $('#n-nombre').value = B.nombre || ''; $('#texto').value = B.texto || ''; $('#n-nuevo').value = B.nuevoGrupo || '';
   renderGrupoSelect($('#n-grupo'), B.grupoId || ls.get('cc_ultimo_grupo') || '', true);
-  modo(B.modo || 'grabar'); pintarLive(); actualizarDur(); pintarPuntBtn();
+  modo(B.modo || 'grabar'); pintarLive(); actualizarDur(); pintarPuntBtn(); pintarDiaNueva(); msg($('#n-dia-msg'), '');
   rstate(B.parrafos.length ? 'En pausa. Toca el botón rojo para seguir grabando.' : 'Toca el botón rojo cuando empiece la clase.');
   if (!SR) { $('#rec').disabled = true; rstate('Este navegador no puede transcribir. Usa Chrome (Android o PC) o Edge (PC), o sube el texto.', 'warn'); }
 }
@@ -1583,19 +1841,24 @@ async function guardarDesdeBorrador(generar) {
   if ($('#n-grupo').value === '__nuevo' && !$('#n-nuevo').value.trim()) { msg($('#n-msg'), 'Escribe el nombre del grupo nuevo.', 'bad'); $('#n-nuevo').focus(); return; }
   if (R.grabando) { detenerRec(); await esperar(900); }
   if (pqBusy || PQ.length) { msg($('#n-msg'), 'Terminando de poner la puntuación…'); await esperarPQ(15000); }
-  const tx = textoTotal().trim();
-  if (tx.length < 200) { msg($('#n-msg'), 'Todavía hay muy poco texto. Graba la clase o sube la transcripción.', 'bad'); return; }
+  if (diaOcupado) { msg($('#n-msg'), 'Espera a que terminen de leerse las diapositivas.', 'warn'); return; }
+  let tx = textoTotal().trim();
+  const dia = B.diapos && B.diapos.texto ? B.diapos : null;
+  if (tx.length < 200 && !dia) { msg($('#n-msg'), 'Todavía hay muy poco texto. Graba la clase, sube la transcripción o agrega las diapositivas.', 'bad'); return; }
+  if (tx.length < 200 && dia && tx.replace(/\[[^\]]*\]/g, '').trim().length < 40) tx = '';
   const btns = [$('#n-generar'), $('#n-guardar')]; btns.forEach((x) => { x.disabled = true; }); msg($('#n-msg'), 'Guardando la clase…');
   try {
     let grupoId = $('#n-grupo').value;
     if (grupoId === '__nuevo') grupoId = (await crearGrupo($('#n-nuevo').value.trim())).id;
     ls.set('cc_ultimo_grupo', grupoId);
-    const partes = dividir(tx);
-    const c = { id: nid(), nombre, grupoId, fecha: hoy(), creada: Date.now(), chars: tx.length, nPartes: partes.length, estado: 'pendiente', notasPartes: [], resumen: '' };
+    const partes = tx ? dividir(tx) : [];
+    const c = { id: nid(), nombre, grupoId, fecha: hoy(), creada: Date.now(), chars: tx.length, nPartes: partes.length || 1, estado: 'pendiente', notasPartes: [], resumen: '' };
+    if (!tx) c.puntuada = true;
+    if (dia) { await A.store.putDiapos(c.id, dia.texto); A.diaCache[c.id] = dia.texto; c.diapos = { n: dia.n, archivos: dia.archivos, chars: dia.texto.length }; }
     const habla = B.parrafos.filter((x) => !x.gap);
     if (!(B.texto || '').trim() && habla.length && habla.every((x) => x.ok)) c.puntuada = true;
     A.txCache[c.id] = partes;
-    await A.store.putTextos(c.id, partes);
+    if (partes.length) await A.store.putTextos(c.id, partes);
     await A.store.putClase(c);
     B = { id: 'actual', nombre: '', grupoId: '', nuevoGrupo: '', modo: 'grabar', parrafos: [], acumulado: 0, desde: null, texto: '' };
     try { await L.del('borrador', 'actual'); } catch (e) {}
@@ -1625,8 +1888,8 @@ async function pasarLocalANube() {
   if (!c.length && !g.length) return;
   banner('Subiendo a tu cuenta las clases que tenías en este equipo…');
   for (const x of g) await Nube.putGrupo(x);
-  for (const x of c) { const t = await L.get('textos', x.id); if (t && t.partes) await Nube.putTextos(x.id, t.partes); await Nube.putClase(Object.assign({}, x, { estado: x.estado === 'procesando' ? 'pendiente' : x.estado })); }
-  for (const x of c) { await L.del('clases', x.id); await L.del('textos', x.id); }
+  for (const x of c) { const t = await L.get('textos', x.id); if (t && t.partes) await Nube.putTextos(x.id, t.partes); const dd = await L.get('textos', x.id + '__dia'); if (dd && dd.partes) await Nube.putDiapos(x.id, dd.partes[0]); await Nube.putClase(Object.assign({}, x, { estado: x.estado === 'procesando' ? 'pendiente' : x.estado })); }
+  for (const x of c) { await L.del('clases', x.id); await L.del('textos', x.id); await L.del('textos', x.id + '__dia'); }
   for (const x of g) await L.del('grupos', x.id);
   banner('');
 }
