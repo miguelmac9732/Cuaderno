@@ -141,6 +141,11 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 @media (prefers-reduced-motion: reduce) { .recbtn.on { animation: none; } .bar i { transition: none; } }
+.actpanel { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--rule); border-radius: 12px; padding: 12px; background: var(--paper, transparent); }
+.actpanel textarea { min-height: 0; resize: vertical; }
+.acts .btn { flex: 1 1 auto; }
+.actitem { border-top: 1px solid var(--rule); padding-top: 10px; margin-top: 10px; }
+.actitem:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
 </style>
 </head>
 <body>
@@ -199,6 +204,35 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
       <button class="btn sm" id="punt-toggle" type="button" aria-pressed="false">Puntuación: apagada</button>
       <span class="muted small" id="punt-hint">Se pone al generar los apuntes</span>
     </div>
+    <div class="row" style="justify-content:space-between">
+      <button class="btn" id="act-btn" type="button" aria-expanded="false">✋ Actividad en clase</button>
+      <span class="muted small">La grabación sigue mientras la usas</span>
+    </div>
+    <section id="act-panel" class="actpanel" hidden>
+      <div class="row" style="justify-content:space-between"><b>Actividad en clase</b><button class="btn link" id="act-cerrar" type="button">Cerrar</button></div>
+      <label class="f"><span>Usar lo que se dijo en</span>
+        <select id="act-min">
+          <option value="5">Los últimos 5 minutos</option>
+          <option value="10" selected>Los últimos 10 minutos</option>
+          <option value="20">Los últimos 20 minutos</option>
+          <option value="40">Los últimos 40 minutos</option>
+          <option value="0">Toda la clase hasta ahora</option>
+        </select>
+      </label>
+      <label class="f"><span>¿Qué pidió la profe? <span class="muted small">(opcional)</span></span>
+        <textarea id="act-q" rows="2" placeholder="Ej.: Dar un ejemplo de notificación voluntaria en su empresa"></textarea>
+      </label>
+      <div class="row acts">
+        <button class="btn" type="button" data-act="pidio">¿Qué pidió?</button>
+        <button class="btn primary" type="button" data-act="participar">Ayúdame a participar</button>
+        <button class="btn" type="button" data-act="resolver">Resolver la actividad</button>
+      </div>
+      <p class="msg" id="act-msg" role="status" aria-live="polite"></p>
+      <div id="act-res-box" hidden>
+        <div class="notes" id="act-res"></div>
+        <div class="row" style="margin-top:8px"><button class="btn sm" id="act-copy" type="button">Copiar</button><button class="btn sm" id="act-stop" type="button" hidden>Detener</button><span class="muted small" id="act-guard"></span></div>
+      </div>
+    </section>
     <div class="livetext" id="live"><p class="muted">El texto aparece aquí mientras el profesor habla. Se guarda solo cada pocos segundos.</p></div>
   </div>
 
@@ -292,6 +326,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     <p class="msg" id="c-dia-msg" role="status" aria-live="polite"></p>
     <details class="box" id="c-dia-box" hidden><summary>Ver texto de las diapositivas</summary><div class="in"><pre id="c-dia-tx">Cargando…</pre></div></details>
   </section>
+  <details class="box" id="c-act-box" hidden><summary id="c-act-sum">Actividades en clase</summary><div class="in" id="c-act"></div></details>
   <details class="box" id="c-det-box"><summary>Apuntes detallados</summary><div class="in notes" id="c-det"></div></details>
   <section class="card qa" id="c-qa">
     <h2 style="margin-bottom:8px">Pregúntale a tu clase</h2>
@@ -382,7 +417,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
     <p class="msg" id="a-resp-msg" role="status"></p>
   </section>
-  <p class="muted small">Cuaderno de Clase · versión 1.10</p>
+  <p class="muted small">Cuaderno de Clase · versión 1.11</p>
 </div></section>
 </main>
 
@@ -907,6 +942,7 @@ function renderClase() {
     $('#c-resumen').innerHTML = c.resumen ? md(c.resumen) : '<p class="wait">Aparecerá aquí cuando generes los apuntes.</p>';
   }
   pintarDiaClase(c, run);
+  pintarActividadesClase(c);
   const det = (c.notasPartes || []).join('\n\n');
   $('#c-det-box').hidden = run || !det;
   $('#c-punt').hidden = run || !!c.puntuada;
@@ -1047,7 +1083,7 @@ $('#c-grupo').addEventListener('change', async () => { const c = claseDe(A.sel);
 function mdExport(c) {
   const det = (c.notasPartes || []).join('\n\n');
   const g = grupoNombre(c.grupoId);
-  return `# ${c.nombre}\n\n${g ? '**Grupo:** ' + g + '  \n' : ''}**Fecha:** ${fmtFecha(c.fecha)}  \n**Duración aproximada:** ${duracion(c.chars || 0)}\n\n# Resumen gerencial\n\n${(c.resumen || '').replace(/\s*\|\|\s*/g, '\n   Respuesta: ')}\n${det ? '\n# Apuntes detallados\n\n' + det + '\n' : ''}`;
+  return `# ${c.nombre}\n\n${g ? '**Grupo:** ' + g + '  \n' : ''}**Fecha:** ${fmtFecha(c.fecha)}  \n**Duración aproximada:** ${duracion(c.chars || 0)}\n\n# Resumen gerencial\n\n${(c.resumen || '').replace(/\s*\|\|\s*/g, '\n   Respuesta: ')}\n${det ? '\n# Apuntes detallados\n\n' + det + '\n' : ''}${(c.actividades || []).length ? '\n# Actividades en clase\n\n' + c.actividades.map((x) => `## ${ACT_TIPOS[x.tipo] || 'Actividad'}${x.t != null ? ' (minuto ' + fmtT(x.t) + ')' : ''}\n\n${x.pedido ? '**Pedido:** ' + x.pedido + '\n\n' : ''}${x.texto}`).join('\n\n') + '\n' : ''}`;
 }
 function bajar(nombre, texto, tipo) {
   const url = URL.createObjectURL(new Blob([texto], { type: (tipo || 'text/plain') + ';charset=utf-8' }));
@@ -1822,7 +1858,7 @@ function ordenarTranscripcion(raw) {
 function cargarFormulario() {
   $('#n-nombre').value = B.nombre || ''; $('#texto').value = B.texto || ''; $('#n-nuevo').value = B.nuevoGrupo || '';
   renderGrupoSelect($('#n-grupo'), B.grupoId || ls.get('cc_ultimo_grupo') || '', true);
-  modo(B.modo || 'grabar'); pintarLive(); actualizarDur(); pintarPuntBtn(); pintarDiaNueva(); msg($('#n-dia-msg'), '');
+  modo(B.modo || 'grabar'); pintarLive(); actualizarDur(); pintarPuntBtn(); pintarDiaNueva(); msg($('#n-dia-msg'), ''); if (!(B.actividades || []).length) { $('#act-res-box').hidden = true; $('#act-res').innerHTML = ''; $('#act-q').value = ''; }
   rstate(B.parrafos.length ? 'En pausa. Toca el botón rojo para seguir grabando.' : 'Toca el botón rojo cuando empiece la clase.');
   if (!SR) { $('#rec').disabled = true; rstate('Este navegador no puede transcribir. Usa Chrome (Android o PC) o Edge (PC), o sube el texto.', 'warn'); }
 }
@@ -1854,6 +1890,7 @@ async function guardarDesdeBorrador(generar) {
     const partes = tx ? dividir(tx) : [];
     const c = { id: nid(), nombre, grupoId, fecha: hoy(), creada: Date.now(), chars: tx.length, nPartes: partes.length || 1, estado: 'pendiente', notasPartes: [], resumen: '' };
     if (!tx) c.puntuada = true;
+    if (B.actividades && B.actividades.length) c.actividades = B.actividades.map((x) => Object.assign({}, x, { texto: String(x.texto || '').slice(0, 12000) }));
     if (dia) { await A.store.putDiapos(c.id, dia.texto); A.diaCache[c.id] = dia.texto; c.diapos = { n: dia.n, archivos: dia.archivos, chars: dia.texto.length }; }
     const habla = B.parrafos.filter((x) => !x.gap);
     if (!(B.texto || '').trim() && habla.length && habla.every((x) => x.ok)) c.puntuada = true;
@@ -1872,6 +1909,81 @@ async function guardarDesdeBorrador(generar) {
 }
 $('#n-generar').addEventListener('click', () => guardarDesdeBorrador(true));
 $('#n-guardar').addEventListener('click', () => guardarDesdeBorrador(false));
+
+// ================= actividad en clase (sin detener la grabación) =================
+const ACT_TIPOS = { pidio: '¿Qué pidió?', participar: 'Participación', resolver: 'Actividad resuelta' };
+let actCtl = null;
+function textoReciente(min) {
+  if (B.modo === 'texto' || !B.parrafos.length) { const t = (B.texto || textoTotal() || '').trim(); return min ? t.slice(-min * 1100) : t; }
+  const ahora = segRec(), desde = min ? ahora - min * 60 : -1;
+  let ps = B.parrafos.filter((p) => p.gap || p.t >= desde || (p.t < desde && p === B.parrafos[B.parrafos.length - 1]));
+  let t = ps.map((p) => p.gap ? p.texto : `[${fmtT(p.t)}] ${p.texto}`).join('\n');
+  if (R.grabando && R.pend) t += (t ? ' ' : '') + R.pend;
+  return t.length > 120000 ? '…' + t.slice(-120000) : t;
+}
+const pActividad = (tipo, nombre, min, tx, pedido, dia) => `Soy estudiante y estoy en una clase EN VIVO${nombre ? ' («' + nombre + '»)' : ''}. ${min ? `Te paso lo que se dijo en los últimos ${min} minutos` : 'Te paso lo que se ha dicho en la clase hasta ahora'}: es una transcripción automática, con errores de reconocimiento y sin puntuación, así que corrige por contexto.
+${pedido ? `Lo que pidió la profesora o el profesor, según yo: «${pedido}».` : 'Busca al final de la transcripción la actividad, pregunta o participación que pidió la profesora o el profesor.'}
+
+${tipo === 'pidio' ? `Responde en Markdown, corto y fácil de leer rápido:
+**Qué pidió:** en 1 a 3 viñetas: la actividad o pregunta exacta, el formato (oral, escrito, grupo, foro…) y el plazo si lo dijo. Si no se identifica una actividad clara, dilo en una línea.
+**Lo último que se explicó:** 3 a 5 viñetas cortas.` : tipo === 'participar' ? `Escríbeme mi intervención para decirla en voz alta o escribirla en el chat: en primera persona, natural y sencilla, como habla un estudiante en Colombia (sin palabras rebuscadas), de 70 a 130 palabras. Que responda exactamente a lo que se pidió y se conecte con algo que se dijo en clase o con las diapositivas. Si sirve, incluye un ejemplo práctico.
+Después escribe **Si te repreguntan:** con 2 viñetas cortas de respaldo.
+No escribas nada más.` : `Resuelve la actividad completa, lista para entregar o presentar, siguiendo el formato que se pidió (si no se sabe, usa títulos cortos y viñetas). Basa la respuesta en lo que se dijo en clase y en las diapositivas; si necesitas conocimiento general, úsalo sin contradecir la clase. Escribe en español de Colombia, claro y sencillo, en Markdown.
+Al final escribe **Para revisar:** con 1 o 2 viñetas sobre lo que yo debería confirmar o ajustar.`}
+
+Transcripción:
+\"\"\"
+${tx || '(todavía no hay texto en ese tiempo)'}
+\"\"\"${dia ? `
+
+Diapositivas de la clase (fragmentos):
+\"\"\"
+${dia}
+\"\"\"` : ''}`;
+function abrirActividad(abrir) {
+  const pn = $('#act-panel'); pn.hidden = abrir === undefined ? !pn.hidden : !abrir;
+  $('#act-btn').setAttribute('aria-expanded', String(!pn.hidden));
+  if (!pn.hidden) pn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+$('#act-btn').addEventListener('click', () => abrirActividad());
+$('#act-cerrar').addEventListener('click', () => abrirActividad(false));
+for (const b of document.querySelectorAll('#act-panel [data-act]')) b.addEventListener('click', () => hacerActividad(b.dataset.act));
+async function hacerActividad(tipo) {
+  const m = $('#act-msg');
+  if (!apiKey()) { msg(m, errIA({ sinClave: true }).replace(' y vuelve a tocar «Generar apuntes»', ''), 'bad'); return; }
+  const min = +$('#act-min').value, pedido = $('#act-q').value.trim();
+  const tx = textoReciente(min);
+  if (tx.replace(/\[[^\]]*\]/g, '').trim().length < 60 && !pedido) { msg(m, 'Todavía no hay casi texto en ese tiempo. Elige más minutos o escribe qué pidió la profe.', 'warn'); return; }
+  const dia = B.diapos && B.diapos.texto ? contexto(B.diapos.texto, (pedido + ' ' + tx.slice(-3000)), 4, 12000) : '';
+  if (actCtl) actCtl.abort(); actCtl = new AbortController();
+  const btns = [...document.querySelectorAll('#act-panel [data-act]')]; btns.forEach((x) => { x.disabled = true; });
+  $('#act-res-box').hidden = false; $('#act-stop').hidden = false; $('#act-guard').textContent = '';
+  $('#act-res').innerHTML = '<p class="wait">Leyendo lo que se dijo… la grabación sigue.</p>'; msg(m, '');
+  const momento = R.grabando || B.parrafos.length ? segRec() : null;
+  try {
+    const { text } = await llamar(pActividad(tipo, $('#n-nombre').value.trim(), min, tx, pedido, dia), { signal: actCtl.signal, max: 5000, onText: (t) => { $('#act-res').innerHTML = md(t); } });
+    B.actividades = (B.actividades || []).concat({ t: momento, tipo, pedido, texto: text.trim(), creada: Date.now() }).slice(-40);
+    bCambio = true; guardarBorrador();
+    $('#act-guard').textContent = 'Guardado: quedará en la clase.';
+  } catch (e) {
+    if (e && e.abort) msg(m, 'Detenido.', 'warn');
+    else { $('#act-res-box').hidden = true; msg(m, errIA(e).replace(/ Toca.*$/, ''), 'bad'); }
+  } finally { btns.forEach((x) => { x.disabled = false; }); $('#act-stop').hidden = true; actCtl = null; }
+}
+$('#act-stop').addEventListener('click', () => actCtl && actCtl.abort());
+$('#act-copy').addEventListener('click', async (ev) => {
+  const b = ev.currentTarget;
+  try { await navigator.clipboard.writeText($('#act-res').innerText); b.textContent = 'Copiado'; }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($('#act-res')); const s2 = getSelection(); s2.removeAllRanges(); s2.addRange(r); b.textContent = 'Seleccionado: cópialo'; }
+  setTimeout(() => { b.textContent = 'Copiar'; }, 2500);
+});
+function pintarActividadesClase(c) {
+  const a = c.actividades || [];
+  $('#c-act-box').hidden = !a.length;
+  if (!a.length) return;
+  $('#c-act-sum').textContent = `Actividades en clase (${a.length})`;
+  $('#c-act').innerHTML = a.map((x) => `<div class="actitem"><div class="muted small"><b>${esc(ACT_TIPOS[x.tipo] || 'Actividad')}</b>${x.t != null ? ' · minuto ' + esc(fmtT(x.t)) : ''}${x.pedido ? ' · ' + esc(x.pedido) : ''}</div><div class="notes">${md(x.texto || '')}</div></div>`).join('');
+}
 
 // ================= cuenta (Google / Firebase) =================
 async function entrar() {
