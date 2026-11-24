@@ -417,7 +417,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
     <p class="msg" id="a-resp-msg" role="status"></p>
   </section>
-  <p class="muted small">Cuaderno de Clase · versión 1.11</p>
+  <p class="muted small">Cuaderno de Clase · versión 1.12</p>
 </div></section>
 </main>
 
@@ -1547,11 +1547,14 @@ function crearRec() {
     if (!R.finCorte) R.finCorte = Date.now();
     R.intentos++;
     if (R.intentos > 3) rstate('Reconectando el micrófono…', 'warn');
+    // con la ventana tapada, Chrome frena los temporizadores: se reinicia de inmediato para no perder frases
+    if (document.hidden && !ANDROID && R.intentos <= 2) { arrancarRec(); return; }
     setTimeout(arrancarRec, R.intentos <= 2 ? 100 : Math.min(250 * 2 ** (R.intentos - 2), 10000));
   };
   return r;
 }
-function arrancarRec() { if (!R.grabando || R.corriendo || document.hidden) return; try { R.rec = crearRec(); R.rec.start(); } catch (e) { setTimeout(arrancarRec, 1000); } }
+const PAUSA_OCULTA = () => ANDROID && document.hidden; // en el celular Android duerme a Chrome; en el PC se sigue escuchando
+function arrancarRec() { if (!R.grabando || R.corriendo || PAUSA_OCULTA()) return; try { R.rec = crearRec(); R.rec.start(); } catch (e) { setTimeout(arrancarRec, 1000); } }
 async function pantalla() { try { if ('wakeLock' in navigator && !R.wake) { R.wake = await navigator.wakeLock.request('screen'); R.wake.addEventListener('release', () => { R.wake = null; }); } } catch (e) {} }
 function iniciarRec() {
   if (!SR) { msg($('#n-msg'), 'Este navegador no puede transcribir. Usa Google Chrome (Android o PC) o Microsoft Edge (PC).', 'bad'); return; }
@@ -1573,7 +1576,7 @@ function detenerRec() {
 }
 $('#rec').addEventListener('click', () => R.grabando ? detenerRec() : iniciarRec());
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { if (R.grabando && !R.finCorte) R.finCorte = Date.now(); bCambio = true; guardarBorrador(); }
+  if (document.hidden) { if (R.grabando && ANDROID && !R.finCorte) R.finCorte = Date.now(); bCambio = true; guardarBorrador(); }
   else if (R.grabando) { pantalla(); arrancarRec(); }
 });
 window.addEventListener('pagehide', () => { bCambio = true; guardarBorrador(); });
