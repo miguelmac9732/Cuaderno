@@ -399,6 +399,12 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
       <option value="es-MX">Español (México)</option>
       <option value="en-US">Inglés (EE. UU.)</option>
     </select></label>
+    <label class="f"><span>Modo de escucha</span><select id="a-escucha">
+      <option value="auto">Automático (recomendado)</option>
+      <option value="continuo">Continuo: si el micrófono se prende y apaga o solo guarda la primera palabra</option>
+      <option value="frase">Frase por frase: si el texto sale repetido</option>
+    </select></label>
+    <p class="muted small" style="margin:0" id="a-escucha-txt"></p>
   </section>
 
   <section class="card set">
@@ -417,7 +423,7 @@ details.box pre { margin: 0; white-space: pre-wrap; font: .82rem/1.6 var(--f-mon
     </div>
     <p class="msg" id="a-resp-msg" role="status"></p>
   </section>
-  <p class="muted small">Cuaderno de Clase · versión 1.12</p>
+  <p class="muted small">Cuaderno de Clase · versión 1.13</p>
 </div></section>
 </main>
 
@@ -1286,6 +1292,8 @@ function renderAjustes() {
   $('#a-calidad').value = ls.get('cc_calidad') || 'normal';
   $('#a-lang').value = ls.get('cc_lang') || 'es-CO';
   $('#a-punt').checked = puntVivo();
+  $('#a-escucha').value = ls.get('cc_escucha') || 'auto';
+  $('#a-escucha-txt').textContent = (ls.get('cc_escucha') || 'auto') === 'auto' && ls.get('cc_escucha_auto') === 'continuo' ? 'En este equipo se activó solo el modo continuo, porque el micrófono cortaba las frases.' : '';
   $('#a-install').hidden = !A.instalar;
   $('#a-resp-txt').textContent = u ? 'Tus clases ya están guardadas en tu cuenta de Google. Igual puedes descargar una copia en un archivo.' : 'Tus clases están guardadas solo en este equipo. Descarga una copia de vez en cuando, o entra con Google para tenerlas en todos tus equipos.';
 }
@@ -1305,6 +1313,7 @@ $('#a-key-test').addEventListener('click', async () => {
 });
 $('#a-calidad').addEventListener('change', (e) => ls.set('cc_calidad', e.target.value));
 $('#a-lang').addEventListener('change', (e) => ls.set('cc_lang', e.target.value));
+$('#a-escucha').addEventListener('change', (e) => { ls.set('cc_escucha', e.target.value); if (e.target.value === 'auto') ls.del('cc_escucha_auto'); renderAjustes(); });
 $('#a-punt').addEventListener('change', (e) => { ls.set('cc_punt_vivo', e.target.checked ? 'si' : 'no'); pintarPuntBtn(); });
 $('#a-export').addEventListener('click', async () => {
   msg($('#a-resp-msg'), 'Preparando la copia…');
@@ -1498,12 +1507,18 @@ function avisoMicOcupado() {
   b.addEventListener('click', () => { if (R.grabando) detenerRec(); R.avisado = false; modo('texto'); msg(el, ''); $('#p-texto').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   el.append(t, document.createElement('br'), b);
 }
+function escuchaContinua() {
+  const m = ls.get('cc_escucha') || 'auto';
+  if (m === 'continuo') return true;
+  if (m === 'frase') return false;
+  return !ANDROID || ls.get('cc_escucha_auto') === 'continuo';
+}
 function crearRec() {
   const r = new SR();
   r.lang = ls.get('cc_lang') || 'es-CO'; r.interimResults = true; r.maxAlternatives = 1;
-  r.continuous = !ANDROID; // en Android el modo continuo repite frases; se reinicia frase por frase
+  r.continuous = escuchaContinua(); // en Android, frase por frase salvo que el equipo corte las frases
   r.onstart = () => {
-    R.corriendo = true; R.intentos = 0; seg = null; segBase = ''; segEl = null; R.fin = ''; R.pend = '';
+    R.corriendo = true; R.intentos = 0; seg = null; segBase = ''; segEl = null; R.fin = ''; R.pend = ''; R.vistoMax = ''; R.sesIni = Date.now();
     if (R.finCorte && R.grabando) {
       const corte = (Date.now() - R.finCorte) / 1000;
       if (corte > 15) { const hasta = segRec(), desde = hasta - corte; const p = { gap: true, t: desde, texto: `[sin transcripción entre ${fmtT(desde)} y ${fmtT(hasta)}]` }; B.parrafos.push(p); live.appendChild(nodoP(p)); seg = null; marcarCambio(); }
@@ -1519,6 +1534,8 @@ function crearRec() {
     if (f) ponerSesion(f);
     if (it && f && (nrm(it) + ' ').startsWith(nrm(f) + ' ')) it = quitarPrefijo(it, f);
     R.fin = f; R.pend = it;
+    const tot = it ? reducir([f, it].filter(Boolean)) : f;
+    if (tot && contarPal(tot) > contarPal(R.vistoMax || '')) R.vistoMax = tot;
     if (it) { if (!R.pendDesde) { R.pendDesde = Date.now(); if (R.habloEn == null) R.habloEn = segRec(); } } else R.pendDesde = 0;
     interim(it);
   };
@@ -1540,8 +1557,16 @@ function crearRec() {
   r.onend = () => {
     R.corriendo = false;
     // Si la sesión se cortó antes de confirmar el texto provisional, se guarda igual (antes se perdía).
-    if (R.pend) { ponerSesion(reducir([R.fin || '', R.pend])); }
-    R.fin = ''; R.pend = ''; R.pendDesde = 0; interim('');
+    let final = R.pend ? reducir([R.fin || '', R.pend]) : (R.fin || '');
+    // Algunos celulares confirman solo la primera palabra y cortan: se guarda lo más largo que alcanzó a escribir.
+    const vm = R.vistoMax || '';
+    if (vm && contarPal(vm) > contarPal(final) && (!final || (nrm(vm) + ' ').startsWith(nrm(final) + ' '))) final = vm;
+    if (final && final !== R.fin) ponerSesion(final);
+    if (ANDROID && !escuchaContinua() && (ls.get('cc_escucha') || 'auto') === 'auto' && R.fin && contarPal(R.fin) <= 2 && contarPal(vm) >= 4) {
+      R.cortes = (R.cortes || 0) + 1;
+      if (R.cortes >= 3) { ls.set('cc_escucha_auto', 'continuo'); R.cortes = 0; }
+    }
+    R.fin = ''; R.pend = ''; R.vistoMax = ''; R.pendDesde = 0; interim('');
     if (R.forzado && R.grabando) { R.forzado = false; R.intentos = 0; R.finCorte = null; setTimeout(arrancarRec, 60); return; }
     if (!R.grabando) return;
     if (!R.finCorte) R.finCorte = Date.now();
